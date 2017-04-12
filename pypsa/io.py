@@ -141,7 +141,7 @@ def export_to_csv_folder(network, csv_folder_name, encoding=None, export_standar
                 if pd.isnull(default):
                     col_export = pnl[attr].columns[(~pd.isnull(pnl[attr])).any()]
                 else:
-                    col_export = pnl[attr].columns[(pnl[attr] != default).any()]
+                    col_export = pnl[attr] #.columns[(pnl[attr] != default).any()]
 
             if len(col_export) > 0:
                 pnl[attr].loc[:,col_export].to_csv(os.path.join(csv_folder_name,list_name+"-" + attr + ".csv"),encoding=encoding)
