@@ -237,7 +237,7 @@ def define_storage_variables_constraints(network,snapshots):
 
             soc[su,sn] =  [[],"==",0.]
 
-            elapsed_hours = network.snapshot_weightings[sn]
+            elapsed_hours = 1 #network.snapshot_weightings[sn]
 
             if i == 0 and not sus.at[su,"cyclic_state_of_charge"]:
                 previous_state_of_charge = sus.at[su,"state_of_charge_initial"]
