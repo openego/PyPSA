@@ -128,35 +128,35 @@ def export_to_csv_folder(network, csv_folder_name, encoding=None, export_standar
 
             continue
 
-        col_export = []
-        for col in df.columns:
-            #do not export derived attributes
-            if col in ["sub_network","r_pu","x_pu","g_pu","b_pu"]:
-                continue
-            if col in attrs.index and pd.isnull(attrs.at[col,"default"]) and pd.isnull(df[col]).all():
-                continue
-            if (col in attrs.index
-                and df[col].dtype == attrs.at[col, 'dtype']
-                and (df[col] == attrs.at[col,"default"]).all()):
-                continue
+#        col_export = []
+#        for col in df.columns:
+#            #do not export derived attributes
+#            if col in ["sub_network","r_pu","x_pu","g_pu","b_pu"]:
+#                continue
+#            if col in attrs.index and pd.isnull(attrs.at[col,"default"]) and pd.isnull(df[col]).all():
+#                continue
+#            if (col in attrs.index
+#                and df[col].dtype == attrs.at[col, 'dtype']
+#                and (df[col] == attrs.at[col,"default"]).all()):
+#                continue
+#
+#            col_export.append(col)
 
-            col_export.append(col)
-
-        df[col_export].to_csv(filename,encoding=encoding)
+        df.to_csv(filename,encoding=encoding)
 
 
         #now do varying attributes
         for attr in pnl:
-            if attr not in attrs.index:
-                col_export = pnl[attr].columns
-            else:
-                default = attrs.at[attr,"default"]
-
-                if pd.isnull(default):
-                    col_export = pnl[attr].columns[(~pd.isnull(pnl[attr])).any()]
-                else:
-                    col_export = pnl[attr].columns[(pnl[attr] != default).any()]
-
+#            if attr not in attrs.index:
+            col_export = pnl[attr].columns
+#            else:
+#                default = attrs.at[attr,"default"]
+#
+#                if pd.isnull(default):
+#                    col_export = pnl[attr].columns[(~pd.isnull(pnl[attr])).any()]
+#                else:
+#                    col_export = pnl[attr].columns[(pnl[attr] != default).any()]
+#
             filename = os.path.join(csv_folder_name,list_name+"-" + attr + ".csv")
             if len(col_export) > 0:
                 pnl[attr].loc[:,col_export].to_csv(filename,encoding=encoding)
