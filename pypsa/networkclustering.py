@@ -193,7 +193,6 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
 
         voltage_factor = (np.asarray(network.buses.loc[l.bus0,'v_nom'])/v_nom_s)**2
         length_factor = (length_s/l['length'])
-
         data = dict(
             r=1./(voltage_factor/(length_factor * l['r'])).sum(),
             x=1./(voltage_factor/(length_factor * l['x'])).sum(),
@@ -204,7 +203,7 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
             s_nom_min=l['s_nom_min'].sum(),
             s_nom_max=l['s_nom_max'].sum(),
             s_nom_extendable=l['s_nom_extendable'].any(),
-            capital_cost=l['capital_cost'].sum(),
+            capital_cost= np.average(l['capital_cost'], weights= l['s_nom']),
             length=length_s,
             sub_network=consense['sub_network'](l['sub_network']),
             v_ang_min=l['v_ang_min'].max(),
