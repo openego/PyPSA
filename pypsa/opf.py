@@ -28,8 +28,8 @@ from six import iteritems, string_types
 __author__ = "Tom Brown (FIAS), Jonas Hoersch (FIAS), David Schlachtberger (FIAS)"
 __copyright__ = "Copyright 2015-2017 Tom Brown (FIAS), Jonas Hoersch (FIAS), David Schlachtberger (FIAS), GNU GPL 3"
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from scipy.sparse.linalg import spsolve
 from pyomo.environ import (ConcreteModel, Var, Objective,
                            NonNegativeReals, Constraint, Reals,
@@ -60,7 +60,10 @@ from .opt import (l_constraint, l_objective, LExpression, LConstraint,
                   patch_optsolver_free_model_before_solving,
                   patch_optsolver_record_memusage_before_solving,
                   empty_network, free_pyomo_initializers)
-from .descriptors import get_switchable_as_dense, allocate_series_dataframes
+from .descriptors import (get_switchable_as_dense, get_switchable_as_iter,
+                          allocate_series_dataframes, zsum)
+
+pd.Series.zsum = zsum
 
 
 
@@ -269,44 +272,62 @@ def define_generator_variables_constraints(network,snapshots):
 
     ## Deal with ramp limits without unit commitment ##
 
-    sns = snapshots[1:]
-
-    ru_gens = network.generators.index[~network.generators.ramp_limit_up.isnull()]
+    ru_gens = network.generators.index[network.generators.ramp_limit_up.notnull()]
 
     ru = {}
 
     for gen in ru_gens:
-        for i,sn in enumerate(sns):
+        for sn, sn_prev in zip(snapshots[1:], snapshots[:-1]):
             if network.generators.at[gen, "p_nom_extendable"]:
-                lhs = LExpression([(1, network.model.generator_p[gen,sn]), (-1, network.model.generator_p[gen,snapshots[i]]), (-network.generators.at[gen, "ramp_limit_up"], network.model.generator_p_nom[gen])])
+                lhs = LExpression([(1, network.model.generator_p[gen,sn]),
+                                   (-1, network.model.generator_p[gen,sn_prev]),
+                                   (-network.generators.at[gen, "ramp_limit_up"],
+                                    network.model.generator_p_nom[gen])])
             elif not network.generators.at[gen, "committable"]:
-                lhs = LExpression([(1, network.model.generator_p[gen,sn]), (-1, network.model.generator_p[gen,snapshots[i]])], -network.generators.at[gen, "ramp_limit_up"]*network.generators.at[gen, "p_nom"])
+                lhs = LExpression([(1, network.model.generator_p[gen,sn]),
+                                   (-1, network.model.generator_p[gen,sn_prev])],
+                                  -network.generators.at[gen, "ramp_limit_up"]*network.generators.at[gen, "p_nom"])
             else:
-                lhs = LExpression([(1, network.model.generator_p[gen,sn]), (-1, network.model.generator_p[gen,snapshots[i]]), ((network.generators.at[gen, "ramp_limit_start_up"] - network.generators.at[gen, "ramp_limit_up"])*network.generators.at[gen, "p_nom"], network.model.generator_status[gen,snapshots[i]]), (-network.generators.at[gen, "ramp_limit_start_up"]*network.generators.at[gen, "p_nom"], network.model.generator_status[gen,sn])])
+                lhs = LExpression([(1, network.model.generator_p[gen,sn]),
+                                   (-1, network.model.generator_p[gen,sn_prev]),
+                                   ((network.generators.at[gen, "ramp_limit_start_up"] - network.generators.at[gen, "ramp_limit_up"])*network.generators.at[gen, "p_nom"],
+                                    network.model.generator_status[gen,sn_prev]),
+                                   (-network.generators.at[gen, "ramp_limit_start_up"]*network.generators.at[gen, "p_nom"],
+                                    network.model.generator_status[gen,sn])])
 
             ru[gen,sn] = LConstraint(lhs,"<=")
 
-    l_constraint(network.model, "ramp_up", ru, list(ru_gens), sns)
+    l_constraint(network.model, "ramp_up", ru, list(ru_gens), snapshots[1:])
 
 
 
-    rd_gens = network.generators.index[~network.generators.ramp_limit_down.isnull()]
+    rd_gens = network.generators.index[network.generators.ramp_limit_down.notnull()]
 
     rd = {}
 
 
     for gen in rd_gens:
-        for i,sn in enumerate(sns):
+        for sn, sn_prev in zip(snapshots[1:], snapshots[:-1]):
             if network.generators.at[gen, "p_nom_extendable"]:
-                lhs = LExpression([(1, network.model.generator_p[gen,sn]), (-1, network.model.generator_p[gen,snapshots[i]]), (network.generators.at[gen, "ramp_limit_down"], network.model.generator_p_nom[gen])])
+                lhs = LExpression([(1, network.model.generator_p[gen,sn]),
+                                   (-1, network.model.generator_p[gen,sn_prev]),
+                                   (network.generators.at[gen, "ramp_limit_down"],
+                                    network.model.generator_p_nom[gen])])
             elif not network.generators.at[gen, "committable"]:
-                lhs = LExpression([(1, network.model.generator_p[gen,sn]), (-1, network.model.generator_p[gen,snapshots[i]])], network.generators.loc[gen, "ramp_limit_down"]*network.generators.at[gen, "p_nom"])
+                lhs = LExpression([(1, network.model.generator_p[gen,sn]),
+                                   (-1, network.model.generator_p[gen,sn_prev])],
+                                  network.generators.loc[gen, "ramp_limit_down"]*network.generators.at[gen, "p_nom"])
             else:
-                lhs = LExpression([(1, network.model.generator_p[gen,sn]), (-1, network.model.generator_p[gen,snapshots[i]]), ((network.generators.at[gen, "ramp_limit_down"] - network.generators.at[gen, "ramp_limit_shut_down"])*network.generators.at[gen, "p_nom"], network.model.generator_status[gen,sn]), (network.generators.at[gen, "ramp_limit_shut_down"]*network.generators.at[gen, "p_nom"], network.model.generator_status[gen,snapshots[i]])])
+                lhs = LExpression([(1, network.model.generator_p[gen,sn]),
+                                   (-1, network.model.generator_p[gen,sn_prev]),
+                                   ((network.generators.at[gen, "ramp_limit_down"] - network.generators.at[gen, "ramp_limit_shut_down"])*network.generators.at[gen, "p_nom"],
+                                    network.model.generator_status[gen,sn]),
+                                   (network.generators.at[gen, "ramp_limit_shut_down"]*network.generators.at[gen, "p_nom"],
+                                    network.model.generator_status[gen,sn_prev])])
 
             rd[gen,sn] = LConstraint(lhs,">=")
 
-    l_constraint(network.model, "ramp_down", rd, list(rd_gens), sns)
+    l_constraint(network.model, "ramp_down", rd, list(rd_gens), snapshots[1:])
 
 
 
@@ -822,17 +843,22 @@ def define_passive_branch_flows_with_kirchhoff(network,snapshots,skip_vars=False
 
 def define_passive_branch_constraints(network,snapshots):
 
+    from .components import passive_branch_components
+
     passive_branches = network.passive_branches()
     extendable_branches = passive_branches[passive_branches.s_nom_extendable]
     fixed_branches = passive_branches[~ passive_branches.s_nom_extendable]
 
+    s_max_pu = pd.concat({c : get_switchable_as_dense(network,c,'s_max_pu')
+                          for c in passive_branch_components}, axis=1)
+
     flow_upper = {(b[0],b[1],sn) : [[(1,network.model.passive_branch_p[b[0],b[1],sn])],
-                                    "<=", fixed_branches.at[b,"s_nom"]]
+                                    "<=", s_max_pu.at[sn,b]*fixed_branches.at[b,"s_nom"]]
                   for b in fixed_branches.index
                   for sn in snapshots}
 
     flow_upper.update({(b[0],b[1],sn) : [[(1,network.model.passive_branch_p[b[0],b[1],sn]),
-                                          (-1,network.model.passive_branch_s_nom[b[0],b[1]])],"<=",0]
+                                          (-s_max_pu.at[sn,b],network.model.passive_branch_s_nom[b[0],b[1]])],"<=",0]
                        for b in extendable_branches.index
                        for sn in snapshots})
 
@@ -840,12 +866,12 @@ def define_passive_branch_constraints(network,snapshots):
                  list(passive_branches.index), snapshots)
 
     flow_lower = {(b[0],b[1],sn) : [[(1,network.model.passive_branch_p[b[0],b[1],sn])],
-                                    ">=", -fixed_branches.at[b,"s_nom"]]
+                                    ">=", -s_max_pu.at[sn,b]*fixed_branches.at[b,"s_nom"]]
                   for b in fixed_branches.index
                   for sn in snapshots}
 
     flow_lower.update({(b[0],b[1],sn): [[(1,network.model.passive_branch_p[b[0],b[1],sn]),
-                                         (1,network.model.passive_branch_s_nom[b[0],b[1]])],">=",0]
+                                         (s_max_pu.at[sn,b],network.model.passive_branch_s_nom[b[0],b[1]])],">=",0]
                        for b in extendable_branches.index
                        for sn in snapshots})
 
@@ -1011,25 +1037,32 @@ def define_linear_objective(network,snapshots):
     sdc_gens_i = network.generators.index[~network.generators.p_nom_extendable & network.generators.committable & (network.generators.shut_down_cost > 0)]
 
 
+    marginal_cost_it = zip(get_switchable_as_iter(network, 'Generator', 'marginal_cost', snapshots),
+                           get_switchable_as_iter(network, 'StorageUnit', 'marginal_cost', snapshots),
+                           get_switchable_as_iter(network, 'Store', 'marginal_cost', snapshots),
+                           get_switchable_as_iter(network, 'Link', 'marginal_cost', snapshots))
+
     objective = LExpression()
 
 
-    for sn in snapshots:
+    for sn, marginal_cost in zip(snapshots, marginal_cost_it):
+        gen_mc, su_mc, st_mc, link_mc = marginal_cost
+
         weight = network.snapshot_weightings[sn]
         for gen in network.generators.index:
-            coefficient = network.generators.at[gen, "marginal_cost"] * weight
+            coefficient = gen_mc.at[gen] * weight
             objective.variables.extend([(coefficient, model.generator_p[gen, sn])])
 
         for su in network.storage_units.index:
-            coefficient = network.storage_units.at[su, "marginal_cost"] * weight
+            coefficient = su_mc.at[su] * weight
             objective.variables.extend([(coefficient, model.storage_p_dispatch[su,sn])])
 
         for store in network.stores.index:
-            coefficient = network.stores.at[store, "marginal_cost"] * weight
+            coefficient = st_mc.at[store] * weight
             objective.variables.extend([(coefficient, model.store_p[store,sn])])
 
         for link in network.links.index:
-            coefficient = network.links.at[link, "marginal_cost"] * weight
+            coefficient = link_mc.at[link] * weight
             objective.variables.extend([(coefficient, model.link_p[link,sn])])
 
 
@@ -1037,23 +1070,23 @@ def define_linear_objective(network,snapshots):
 
     objective.variables.extend([(extendable_generators.at[gen,"capital_cost"], model.generator_p_nom[gen])
                                 for gen in extendable_generators.index])
-    objective.constant -= (extendable_generators.capital_cost * extendable_generators.p_nom).sum()
+    objective.constant -= (extendable_generators.capital_cost * extendable_generators.p_nom).zsum()
 
     objective.variables.extend([(ext_sus.at[su,"capital_cost"], model.storage_p_nom[su])
                                 for su in ext_sus.index])
-    objective.constant -= (ext_sus.capital_cost*ext_sus.p_nom).sum()
+    objective.constant -= (ext_sus.capital_cost*ext_sus.p_nom).zsum()
 
     objective.variables.extend([(ext_stores.at[store,"capital_cost"], model.store_e_nom[store])
                                 for store in ext_stores.index])
-    objective.constant -= (ext_stores.capital_cost*ext_stores.e_nom).sum()
+    objective.constant -= (ext_stores.capital_cost*ext_stores.e_nom).zsum()
 
     objective.variables.extend([(extendable_passive_branches.at[b,"capital_cost"], model.passive_branch_s_nom[b])
                                 for b in extendable_passive_branches.index])
-    objective.constant -= (extendable_passive_branches.capital_cost * extendable_passive_branches.s_nom).sum()
+    objective.constant -= (extendable_passive_branches.capital_cost * extendable_passive_branches.s_nom).zsum()
 
     objective.variables.extend([(extendable_links.at[b,"capital_cost"], model.link_p_nom[b])
                                 for b in extendable_links.index])
-    objective.constant -= (extendable_links.capital_cost * extendable_links.p_nom).sum()
+    objective.constant -= (extendable_links.capital_cost * extendable_links.p_nom).zsum()
 
 
     ## Unit commitment costs
@@ -1084,7 +1117,7 @@ def extract_optimisation_results(network, snapshots, formulation="angles"):
                                          'Link': ['p0', 'p1', 'mu_lower', 'mu_upper']})
 
     #get value of objective function
-    network.objective = network.results["Problem"][0]["Lower bound"]
+    network.objective = network.results["Problem"][0]["Upper bound"]
 
     model = network.model
 
@@ -1127,7 +1160,7 @@ def extract_optimisation_results(network, snapshots, formulation="angles"):
                        .groupby(c.df.bus, axis=1).sum()
                        for c in network.iterate_components(controllable_one_port_components)}) \
               .sum(level=1) \
-              .reindex_axis(network.buses_t.p.columns, axis=1, fill_value=0.)
+              .reindex(columns=network.buses_t.p.columns, fill_value=0.)
 
 
     # passive branches
@@ -1374,9 +1407,9 @@ def network_lopf_solve(network, snapshots=None, formulation="angles", solver_opt
         with empty_network(network):
             network.results = network.opt.solve(*args, suffixes=["dual"], keepfiles=keep_files, options=solver_options)
     else:
-        network.results = network.opt.solve(*args, suffixes=["dual"], keepfiles=keep_files, options=solver_options) 
+        network.results = network.opt.solve(*args, suffixes=["dual"], keepfiles=keep_files, options=solver_options)
 
-    if logger.level > 0:
+    if logger.isEnabledFor(logging.INFO):
         network.results.write()
 
     status = network.results["Solver"][0]["Status"].key
@@ -1450,4 +1483,3 @@ def network_lopf(network, snapshots=None, solver_name="glpk", solver_io=None,
     network_lopf_prepare_solver(network, solver_name=solver_name, solver_io=solver_io)
 
     return network_lopf_solve(network, snapshots, formulation=formulation, solver_options=solver_options, keep_files=keep_files, free_memory=free_memory)
-

@@ -43,7 +43,9 @@ from operator import itemgetter
 from itertools import chain
 import time
 
-from .descriptors import get_switchable_as_dense, allocate_series_dataframes, Dict
+from .descriptors import get_switchable_as_dense, allocate_series_dataframes, Dict, zsum
+
+pd.Series.zsum = zsum
 
 def _as_snapshots(network, snapshots):
     if snapshots is None:
@@ -413,7 +415,7 @@ def apply_line_types(network):
 
     lines_with_types_b = network.lines.type != ""
 
-    if lines_with_types_b.sum() == 0:
+    if lines_with_types_b.zsum() == 0:
         return
 
     for attr in ["r","x"]:
@@ -446,7 +448,7 @@ def apply_transformer_types(network):
     trafos = network.transformers
     trafos_with_types_b = trafos.type != ""
 
-    if trafos_with_types_b.sum() == 0:
+    if trafos_with_types_b.zsum() == 0:
         return
 
     trafos.loc[trafos_with_types_b, "r"] = trafos.loc[trafos_with_types_b, "type"].map(network.transformer_types["vscr"])/100.
@@ -505,7 +507,7 @@ def apply_transformer_t_model(network):
 
     ts_b = (network.transformers.model == "t") & (y_shunt != 0.)
 
-    if ts_b.sum() == 0:
+    if ts_b.zsum() == 0:
         return
 
     za,zb,zc = wye_to_delta(z_series.loc[ts_b]/2,z_series.loc[ts_b]/2,1/y_shunt.loc[ts_b])
@@ -592,9 +594,11 @@ def find_bus_controls(sub_network):
     network.buses.loc[buses_i, "control"] = "PQ"
 
     #find all buses with one or more gens with PV
-    pvs = gens[gens.control == 'PV'].index.to_series().groupby(gens.bus).first()
-    network.buses.loc[pvs.index, "control"] = "PV"
-    network.buses.loc[pvs.index, "generator"] = pvs
+    pvs = gens[gens.control == 'PV'].index.to_series()
+    if len(pvs) > 0:
+        pvs = pvs.groupby(gens.bus).first()
+        network.buses.loc[pvs.index, "control"] = "PV"
+        network.buses.loc[pvs.index, "generator"] = pvs
 
     network.buses.loc[sub_network.slack_bus, "control"] = "Slack"
     network.buses.loc[sub_network.slack_bus, "generator"] = sub_network.slack_generator
@@ -790,7 +794,7 @@ averaged).
             attr_mean = ["capital_cost","length","terrain_factor"]
 
             for attr in attr_inv:
-                aggregated[attr] = 1/(1/lines[attr]).sum()
+                aggregated[attr] = 1./(1./lines[attr]).sum()
 
             for attr in attr_sum:
                 aggregated[attr] = lines[attr].sum()
@@ -981,7 +985,7 @@ def sub_network_lpf(sub_network, snapshots=None, skip_pre=False):
         network.buses_t.v_mag_pu.loc[snapshots, buses_o] = 1.
 
     # set slack bus power to pick up remained
-    slack_adjustment = (- network.buses_t.p.loc[snapshots, buses_o[1:]].sum(axis=1)
+    slack_adjustment = (- network.buses_t.p.loc[snapshots, buses_o[1:]].sum(axis=1).fillna(0.)
                         - network.buses_t.p.loc[snapshots, buses_o[0]])
     network.buses_t.p.loc[snapshots, buses_o[0]] += slack_adjustment
 
