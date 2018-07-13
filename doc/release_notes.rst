@@ -2,6 +2,143 @@
 Release Notes
 #######################
 
+PyPSA 0.13.1 (27th March 2018)
+==============================
+
+This release contains bug fixes for the new features introduced in
+0.13.0.
+
+* Export network to netCDF file bug fixed (components that were all
+  standard except their name were ignored).
+* Import/export network to HDF5 file bug fixed and now works with more
+  than 1000 columns; HDF5 format is no longer deprecated.
+* When networks are copied or sliced, overridden components
+  (introduced in 0.13.0) are also copied.
+* Sundry other small fixes.
+
+We thank Tim Kittel for pointing out the first and second bugs. We
+thank Kostas Syranidis for not only pointing out the third issue with
+copying overridden components, but also submitting a fix as a pull
+request.
+
+For this release we acknowledge funding to Tom Brown from the
+`RE-INVEST project <http://www.reinvestproject.eu/>`_.
+
+
+
+PyPSA 0.13.0 (25th January 2018)
+================================
+
+This release contains new features aimed at coupling power networks to
+other energy sectors, fixes for library dependencies and some minor
+internal API changes.
+
+* If you want to define your own components and override the standard
+  functionality of PyPSA, you can now override the standard components
+  by passing pypsa.Network() the arguments ``override_components`` and
+  ``override_component_attrs``, see the section on
+  :ref:`custom_components`. There are examples for defining new
+  components in the git repository in ``examples/new_components/``,
+  including an example of overriding ``network.lopf()`` for
+  functionality for combined-heat-and-power (CHP) plants.
+* The ``Link`` component can now be defined with multiple outputs in
+  fixed ratio to the power in the single input by defining new columns
+  ``bus2``, ``bus3``, etc. (``bus`` followed by an integer) in
+  ``network.links`` along with associated columns for the efficiencies
+  ``efficiency2``, ``efficiency3``, etc. The different outputs are
+  then proportional to the input according to the efficiency; see
+  sections :ref:`components-links-multiple-outputs` and
+  :ref:`opf-links` and the `example of a CHP with a fixed power-heat
+  ratio
+  <https://www.pypsa.org/examples/chp-fixed-heat-power-ratio.html>`_.
+* Networks can now be exported to and imported from netCDF files with
+  ``network.export_to_netcdf()`` and
+  ``network.import_from_netcdf()``. This is faster than using CSV
+  files and the files take up less space. Import and export with HDF5
+  files, introduced in PyPSA 0.12.0, is now deprecated.
+* The export and import code has been refactored to be more general
+  and abstract. This does not affect the API.
+* The internally-used sets such as ``pypsa.components.all_components``
+  and ``pypsa.components.one_port_components`` have been moved from
+  ``pypsa.components`` to ``network``, i.e. ``network.all_components``
+  and ``network.one_port_components``, since these sets may change
+  from network to network.
+* For linear power flow, PyPSA now pre-calculates the effective per
+  unit reactance ``x_pu_eff`` for AC lines to take account of the
+  transformer tap ratio, rather than doing it on the fly; this makes
+  some code faster, particularly the kirchhoff formulation of the
+  LOPF.
+* PyPSA is now compatible with networkx 2.0 and 2.1.
+* PyPSA now requires Pyomo version greater than 5.3.
+* PyPSA now uses the `Travis CI <https://travis-ci.org/PyPSA/PyPSA>`_
+  continuous integration service to test every commit in the `PyPSA
+  GitHub repository <https://github.com/PyPSA/PyPSA>`_. This will
+  allow us to catch library dependency issues faster.
+
+We thank Russell Smith of Edison Energy for the pull request for the
+effective reactance that sped up the LOPF code and Tom Edwards for
+pointing out the Pyomo version dependency issue.
+
+For this release we also acknowledge funding to Tom Brown from the
+`RE-INVEST project <http://www.reinvestproject.eu/>`_.
+
+
+
+
+PyPSA 0.12.0 (30th November 2017)
+=================================
+
+This release contains new features and bug fixes.
+
+* Support for Pyomo's persistent solver interface, so if you're making
+  small changes to an optimisation model (e.g. tweaking a parameter),
+  you don't have to rebuild the model every time. To enable this,
+  ``network_lopf`` has been internally split into ``build_model``,
+  ``prepare_solver`` and ``solve`` to allow more fine-grained control of the
+  solving steps.  Currently the new Pyomo PersistentSolver interface
+  is not in the main Pyomo branch, see
+  the `pull request <https://github.com/Pyomo/pyomo/pull/223>`_; you can obtain it with
+  ``pip install git+https://github.com/Pyomo/pyomo@persistent_interfaces``
+* Lines and transformers (i.e. passive branches) have a new attribute
+  ``s_max_pu`` to restrict the flow in the OPF, just like ``p_max_pu``
+  for generators and links. It works by restricting the absolute value
+  of the flow per unit of the nominal rating ``abs(flow) <=
+  s_max_pu*s_nom``. For lines this can represent an n-1 contingency
+  factor or it can be time-varying to represent weather-dependent
+  dynamic line rating.
+* The ``marginal_cost`` attribute of generators, storage units, stores
+  and links can now be time dependent.
+* When initialising the Network object, i.e. ``network =
+  pypsa.Network()``, the first keyword argument is now ``import_name``
+  instead of ``csv_folder_name``. With ``import_name`` PyPSA
+  recognises whether it is a CSV folder or an HDF5 file based on the
+  file name ending and deals with it appropriately. Example usage:
+  ``nw1 = pypsa.Network("my_store.h5")`` and ``nw2 =
+  pypsa.Network("/my/folder")``. The keyword argument
+  ``csv_folder_name`` is still there but is deprecated.
+* The value ``network.objective`` is now read from the Pyomo results
+  attribute ``Upper Bound`` instead of ``Lower Bound``. This is
+  because for MILP problems under certain circumstances CPLEX records
+  the ``Lower bound`` as the relaxed value. ``Upper bound`` is correctly
+  recorded as the integer objective value.
+* Bug fix due to changes in pandas 0.21.0: A bug affecting various
+  places in the code, including causing ``network.lopf`` to fail with
+  GLPK, is fixed. This is because in pandas 0.21.0 the sum of an empty
+  Series/DataFrame returns NaN, whereas before it returned zero. This
+  is a subtle bug; we hope we've fixed all instances of it, but get in
+  touch if you notice NaNs creeping in where they shouldn't be. All
+  our tests run fine.
+* Bug fix due to changes in scipy 1.0.0: For the new version of scipy,
+  ``csgraph`` has to be imported explicit.
+* Bug fix: A bug whereby logging level was not always correctly being
+  seen by the OPF results printout is fixed.
+* Bug fix: The storage unit spillage had a bug in the LOPF, whereby it
+  was not respecting ``network.snapshot_weightings`` properly.
+
+We thank René Garcia Rosas, João Gorenstein Dedecca, Marko Kolenc,
+Matteo De Felice and Florian Kühnlenz for promptly notifying us about
+issues.
+
 
 PyPSA 0.11.0 (21st October 2017)
 ================================

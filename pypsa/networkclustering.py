@@ -55,7 +55,7 @@ def _make_consense(component, attr):
         v = x.iat[0]
         assert ((x == v).all() or x.isnull().all()), (
             "In {} cluster {} the values of attribute {} do not agree:\n{}"
-            .format(component, attr, x.name, x)
+            .format(component, x.name, attr, x)
         )
         return v
     return consense
@@ -65,9 +65,14 @@ def _haversine(coords):
     a = np.sin((lat[1]-lat[0])/2.)**2 + np.cos(lat[0]) * np.cos(lat[1]) * np.sin((lon[0] - lon[1])/2.)**2
     return 6371.000 * 2 * np.arctan2( np.sqrt(a), np.sqrt(1-a) )
 
-def aggregategenerators(network, busmap, with_time=True):
+def aggregategenerators(network, busmap, with_time=True, carriers=None):
+    if carriers is None:
+        carriers = network.generators.carrier.unique()
+
+    gens_agg_b = network.generators.carrier.isin(carriers)
     attrs = network.components["Generator"]["attrs"]
-    generators = network.generators.assign(bus=lambda df: df.bus.map(busmap))
+    generators = (network.generators.loc[gens_agg_b]
+                  .assign(bus=lambda df: df.bus.map(busmap)))
     columns = (set(attrs.index[attrs.static & attrs.status.str.startswith('Input')]) | {'weight'}) & set(generators.columns)
     grouper = [generators.bus, generators.carrier]
 
@@ -81,15 +86,21 @@ def aggregategenerators(network, busmap, with_time=True):
     new_df = generators.groupby(grouper, axis=0).agg(strategies)
     new_df.index = _flatten_multiindex(new_df.index).rename("name")
 
+    new_df = pd.concat([new_df,
+                        network.generators.loc[~gens_agg_b]
+                        .assign(bus=lambda df: df.bus.map(busmap))], axis=0)
+
     new_pnl = dict()
     if with_time:
         for attr, df in iteritems(network.generators_t):
-            if not df.empty:
+            pnl_gens_agg_b = df.columns.to_series().map(gens_agg_b)
+            df_agg = df.loc[:, pnl_gens_agg_b]
+            if not df_agg.empty:
                 if attr == 'p_max_pu':
-                    df = df.multiply(weighting.loc[df.columns], axis=1)
-                pnl_df = df.groupby(grouper, axis=1).sum()
+                    df_agg = df_agg.multiply(weighting.loc[df_agg.columns], axis=1)
+                pnl_df = df_agg.groupby(grouper, axis=1).sum()
                 pnl_df.columns = _flatten_multiindex(pnl_df.columns).rename("name")
-                new_pnl[attr] = pnl_df
+                new_pnl[attr] = pd.concat([df.loc[:, ~pnl_gens_agg_b], pnl_df], axis=1)
 
     return new_df, new_pnl
 
@@ -204,6 +215,7 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
             s_nom_min=l['s_nom_min'].sum(),
             s_nom_max=l['s_nom_max'].sum(),
             s_nom_extendable=l['s_nom_extendable'].any(),
+            num_parallel=l['num_parallel'].sum(),
             capital_cost=l['capital_cost'].sum(),
             length=length_s,
             sub_network=consense['sub_network'](l['sub_network']),
@@ -245,6 +257,7 @@ Clustering = namedtuple('Clustering', ['network', 'busmap', 'linemap',
 
 def get_clustering_from_busmap(network, busmap, with_time=True, line_length_factor=1.0,
                                aggregate_generators_weighted=False, aggregate_one_ports={},
+                               aggregate_generators_carriers=None,
                                bus_strategies=dict()):
 
     buses, linemap, linemap_p, linemap_n, lines = get_buses_linemap_and_lines(network, busmap, line_length_factor, bus_strategies)
@@ -257,11 +270,12 @@ def get_clustering_from_busmap(network, busmap, with_time=True, line_length_fact
     if with_time:
         network_c.set_snapshots(network.snapshots)
 
-    one_port_components = components.one_port_components.copy()
+    one_port_components = network.one_port_components.copy()
 
     if aggregate_generators_weighted:
         one_port_components.remove("Generator")
-        generators, generators_pnl = aggregategenerators(network, busmap, with_time=with_time)
+        generators, generators_pnl = aggregategenerators(network, busmap, with_time=with_time,
+                                                         carriers=aggregate_generators_carriers)
         io.import_components_from_dataframe(network_c, generators, "Generator")
         if with_time:
             for attr, df in iteritems(generators_pnl):
@@ -501,13 +515,16 @@ def rectangular_grid_clustering(network, divisions):
 ################
 # Reduce stubs/dead-ends, i.e. nodes with valency 1, iteratively to remove tree-like structures
 
-def busmap_by_stubs(network):
+def busmap_by_stubs(network, matching_attrs=None):
     """Create a busmap by reducing stubs and stubby trees
     (i.e. sequentially reducing dead-ends).
 
     Parameters
     ----------
     network : pypsa.Network
+
+    matching_attrs : None|[str]
+        bus attributes clusters have to agree on
 
     Returns
     -------
@@ -517,28 +534,26 @@ def busmap_by_stubs(network):
 
     """
 
-    busmap = pd.Series(network.buses.index,network.buses.index)
+    busmap = pd.Series(network.buses.index, network.buses.index)
 
-    network = network.copy(with_time=False)
+    G = network.graph()
 
-    count = 0
+    def attrs_match(u, v):
+        return (matching_attrs is None or
+                (network.buses.loc[u, matching_attrs] ==
+                 network.buses.loc[v, matching_attrs]).all())
 
     while True:
-        old_count = count
-        logger.info("{} buses".format(len(network.buses)))
-        graph = network.graph()
-        for u in graph.node:
-            neighbours = list(graph.adj[u].keys())
+        stubs = []
+        for u in G.node:
+            neighbours = list(G.adj[u].keys())
             if len(neighbours) == 1:
-                neighbour = neighbours[0]
-                count +=1
-                lines = list(graph.adj[u][neighbour].keys())
-                for line in lines:
-                    network.remove(*line)
-                network.remove("Bus",u)
-                busmap[busmap==u] = neighbour
-        logger.info("{} deleted".format(count))
-        if old_count == count:
+                v, = neighbours
+                if attrs_match(u, v):
+                    busmap[busmap == u] = v
+                    stubs.append(u)
+        G.remove_nodes_from(stubs)
+        if len(stubs) == 0:
             break
     return busmap
 

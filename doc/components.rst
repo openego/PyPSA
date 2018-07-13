@@ -434,10 +434,48 @@ the ``Link`` with ``efficiency = 1``, ``marginal_cost = 0``,
    :file: ../pypsa/component_attrs/links.csv
 
 
+.. _components-links-multiple-outputs:
+
+Link with multiple outputs or inputs
+------------------------------------
+
+Links can also be defined with multiple outputs in fixed ratio to the
+power in the single input by defining new columns ``bus2``, ``bus3``,
+etc. (``bus`` followed by an integer) in ``network.links`` along with
+associated columns for the efficiencies ``efficiency2``,
+``efficiency3``, etc. The different outputs are then proportional to
+the input according to the efficiency; see :ref:`opf-links` for how
+these are used in the LOPF and the `example of a CHP with a fixed
+power-heat ratio
+<https://www.pypsa.org/examples/chp-fixed-heat-power-ratio.html>`_.
+
+To define the new columns ``bus2``, ``efficiency2``, ``bus3``,
+``efficiency3``, etc. in ``network.links`` you need to override the
+standard component attributes by passing ``pypsa.Network()`` an
+``override_component_attrs`` argument. See the section
+:ref:`custom_components` and the `example of a CHP with a fixed
+power-heat ratio
+<https://www.pypsa.org/examples/chp-fixed-heat-power-ratio.html>`_.
+
+
+If the column ``bus2`` exists, values in the column are not compulsory
+for all links; if the link has no 2nd output, simply leave it empty
+``network.links.at["my_link","bus2"] = ""``.
+
+For links with multiple inputs in fixed ratio to a single output,
+simply reverse the flow in a link with one input and multiple outputs
+by setting ``my_link.p_max_pu = 0`` and ``my_link.p_min_pu = -1``.
+
+For multiple inputs to multiple outputs, connect a multi-to-single
+link to a single-to-multi link with an auxiliary bus in the middle.
+
+
 Groups of Components
 ====================
 
-In the code components are grouped according to their properties.
+In the code components are grouped according to their properties in
+sets such as ``network.one_port_components`` and
+``network.branch_components``.
 
 One-ports share the property that they all connect to a single bus,
 i.e. generators, loads, storage units, etc.. They share the attributes
@@ -453,3 +491,31 @@ nodal power imbalances, i.e. lines and transformers.
 
 Controllable branches are branches whose power flow can be controlled
 by e.g. the LOPF optimisation, i.e. links.
+
+
+.. _custom_components:
+
+Custom Components
+=================
+
+If you want to define your own components and override the standard
+functionality of PyPSA, you can easily override the standard
+components by passing pypsa.Network() the arguments
+``override_components`` and ``override_component_attrs``.
+
+For this network, these will replace the standard definitions in
+``pypsa.components.components`` and
+``pypsa.components.component_attrs``, which correspond to the
+repository CSV files ``pypsa/components.csv`` and
+``pypsa/component_attrs/*.csv``.
+
+``components`` is a pandas.DataFrame with the component ``name``,
+``list_name`` and ``description``. ``component_attrs`` is a
+pypsa.descriptors.Dict of pandas.DataFrame with the attribute
+properties for each component.  Just follow the formatting for the
+standard components.
+
+There are examples for defining new components in the git repository
+in ``examples/new_components/``, including an example of
+overriding e.g. ``network.lopf()`` for functionality for
+combined-heat-and-power (CHP) plants.

@@ -1,6 +1,6 @@
 
 
-## Copyright 2015-2017 Tom Brown (FIAS), Jonas Hoersch (FIAS)
+## Copyright 2015-2018 Tom Brown (FIAS), Jonas Hoersch (FIAS)
 
 ## This program is free software; you can redistribute it and/or
 ## modify it under the terms of the GNU General Public License as
@@ -52,6 +52,7 @@ from .descriptors import Dict, get_switchable_as_dense
 
 from .io import (export_to_csv_folder, import_from_csv_folder,
                  export_to_hdf5, import_from_hdf5,
+                 export_to_netcdf, import_from_netcdf,
                  import_from_pypower_ppc, import_components_from_dataframe,
                  import_series_from_dataframe, import_from_pandapower_net)
 
@@ -88,6 +89,19 @@ standard_types_dir_name = "standard_types"
 inf = float("inf")
 
 
+components = pd.read_csv(os.path.join(dir_name,
+                                      "components.csv"),
+                         index_col=0)
+
+component_attrs = Dict()
+
+for component in components.index:
+    file_name = os.path.join(dir_name,
+                             component_attrs_dir_name,
+                             components.at[component,"list_name"] + ".csv")
+    component_attrs[component] = pd.read_csv(file_name, index_col=0, na_values="n/a")
+
+del component
 
 class Basic(object):
     """Common to every object."""
@@ -125,12 +139,22 @@ class Network(Basic):
 
     Parameters
     ----------
-    csv_folder_name : string
-        Name of folder from which to import CSVs of network data.
+    import_name : string
+        Name of HDF5 .h5 store or folder from which to import CSVs of network data.
     name : string, default ""
         Network name.
     ignore_standard_types : boolean, default False
         If True, do not read in PyPSA standard types into standard types DataFrames.
+    csv_folder_name : string
+        Name of folder from which to import CSVs of network data. Overrides import_name.
+    override_components : pandas.DataFrame
+        If you want to override the standard PyPSA components in pypsa.components.components,
+        pass it a DataFrame with index of component name and columns of list_name and
+        description, following the format of pypsa.components.components.
+        See git repository examples/new_components/.
+    override_component_attrs : pypsa.descriptors.Dict of pandas.DataFrame
+        If you want to override pypsa.component_attrs, follow its format.
+        See git repository examples/new_components/.
     kwargs
         Any remaining attributes to set
 
@@ -140,7 +164,8 @@ class Network(Basic):
 
     Examples
     --------
-    >>> nw = pypsa.Network(csv_folder_name=/my/folder)
+    >>> nw1 = pypsa.Network("my_store.h5")
+    >>> nw2 = pypsa.Network("/my/folder")
 
     """
 
@@ -156,6 +181,10 @@ class Network(Basic):
     import_from_hdf5 = import_from_hdf5
 
     export_to_hdf5 = export_to_hdf5
+
+    import_from_netcdf = import_from_netcdf
+
+    export_to_netcdf = export_to_netcdf
 
     import_from_pypower_ppc = import_from_pypower_ppc
 
@@ -189,11 +218,20 @@ class Network(Basic):
 
     adjacency_matrix = adjacency_matrix
 
-    def __init__(self, csv_folder_name=None, name="", ignore_standard_types=False, **kwargs):
+    def __init__(self, import_name=None, name="", ignore_standard_types=False,
+                 override_components=None, override_component_attrs=None,
+                 **kwargs):
 
-        from .__init__ import __version__ as pypsa_version
+        if 'csv_folder_name' in kwargs:
+            logger.warning("The argument csv_folder_name for initiating Network() is deprecated, please use import_name instead.")
+            import_name = kwargs.pop('csv_folder_name')
 
-        Basic.__init__(self,name)
+        # Initialise root logger and set its level, if this has not been done before
+        logging.basicConfig(level=logging.INFO)
+
+        from . import __version__ as pypsa_version
+
+        Basic.__init__(self, name)
 
         #this will be saved on export
         self.pypsa_version = pypsa_version
@@ -204,18 +242,31 @@ class Network(Basic):
         #corresponds to number of hours represented by each snapshot
         self.snapshot_weightings = pd.Series(index=self.snapshots,data=1.)
 
-        components = pd.read_csv(os.path.join(dir_name,
-                                              "components.csv"),
-                                 index_col=0)
+        if override_components is None:
+            self.components = components
+        else:
+            self.components = override_components
 
-        self.components = Dict(components.T.to_dict())
+        if override_component_attrs is None:
+            self.component_attrs = component_attrs
+        else:
+            self.component_attrs = override_component_attrs
 
-        for component in self.components.keys():
-            file_name = os.path.join(dir_name,
-                                     component_attrs_dir_name,
-                                     self.components[component]["list_name"] + ".csv")
+        for c_type in set(self.components.type.unique()) - {np.nan}:
+            setattr(self, c_type + "_components",
+                    set(self.components.index[self.components.type == c_type]))
 
-            attrs = pd.read_csv(file_name, index_col=0, na_values="n/a")
+        self.one_port_components = self.passive_one_port_components|self.controllable_one_port_components
+
+        self.branch_components = self.passive_branch_components|self.controllable_branch_components
+
+        self.all_components = set(self.components.index) - {"Network"}
+
+        self.components = Dict(self.components.T.to_dict())
+
+        for component in self.components:
+            #make copies to prevent unexpected sharing of variables
+            attrs = self.component_attrs[component].copy()
 
             attrs['static'] = (attrs['type'] != 'series')
             attrs['varying'] = attrs['type'].isin({'series', 'static or series'})
@@ -239,10 +290,13 @@ class Network(Basic):
         if not ignore_standard_types:
             self.read_in_default_standard_types()
 
-
-        if csv_folder_name is not None:
-            self.import_from_csv_folder(csv_folder_name)
-
+        if import_name is not None:
+            if import_name[-3:] == ".h5":
+                self.import_from_hdf5(import_name)
+            elif import_name[-3:] == ".nc":
+                self.import_from_netcdf(import_name)
+            else:
+                self.import_from_csv_folder(import_name)
 
         for key, value in iteritems(kwargs):
             setattr(self, key, value)
@@ -251,7 +305,7 @@ class Network(Basic):
     def _build_dataframes(self):
         """Function called when network is created to build component pandas.DataFrames."""
 
-        for component in all_components:
+        for component in self.all_components:
 
             attrs = self.components[component]["attrs"]
 
@@ -275,7 +329,7 @@ class Network(Basic):
 
     def read_in_default_standard_types(self):
 
-        for std_type in standard_types:
+        for std_type in self.standard_type_components:
 
             list_name = self.components[std_type]["list_name"]
 
@@ -344,7 +398,7 @@ class Network(Basic):
         if isinstance(snapshots, pd.DatetimeIndex) and _pd_version < '0.18.0':
             snapshots = pd.Index(snapshots.values)
 
-        for component in all_components:
+        for component in self.all_components:
             pnl = self.pnl(component)
             attrs = self.components[component]["attrs"]
 
@@ -376,19 +430,14 @@ class Network(Basic):
 
         """
 
-        if class_name not in self.components:
-            logger.error("Component class {} not found".format(class_name))
-            return None
+        assert class_name in self.components, "Component class {} not found".format(class_name)
 
         cls_df = self.df(class_name)
         cls_pnl = self.pnl(class_name)
 
         name = str(name)
 
-        if name in cls_df.index:
-            logger.error("Failed to add {} component {} because there is already an object with this name in {}".format(class_name, name, self.components[class_name]["list_name"]))
-            return
-
+        assert name not in cls_df.index, "Failed to add {} component {} because there is already an object with this name in {}".format(class_name, name, self.components[class_name]["list_name"])
 
         attrs = self.components[class_name]["attrs"]
 
@@ -551,6 +600,20 @@ class Network(Basic):
             df.drop(df.columns.intersection(names), axis=1, inplace=True)
 
 
+    def _retrieve_overridden_components(self):
+
+        components_index = list(self.components.keys())
+
+        cols = ["list_name","description","type"]
+
+        override_components = pd.DataFrame([[self.components[i][c] for c in cols] for i in components_index],
+                                           columns=cols,
+                                           index=components_index)
+
+        override_component_attrs = Dict({i : self.component_attrs[i].copy() for i in components_index})
+
+        return override_components, override_component_attrs
+
 
     def copy(self, with_time=True, ignore_standard_types=False):
         """
@@ -574,12 +637,16 @@ class Network(Basic):
 
         """
 
-        network = self.__class__(ignore_standard_types=ignore_standard_types)
+        override_components, override_component_attrs = self._retrieve_overridden_components()
 
-        for component in self.iterate_components(["Bus", "Carrier"] + sorted(all_components - {"Bus","Carrier"})):
+        network = self.__class__(ignore_standard_types=ignore_standard_types,
+                                 override_components=override_components,
+                                 override_component_attrs=override_component_attrs)
+
+        for component in self.iterate_components(["Bus", "Carrier"] + sorted(self.all_components - {"Bus","Carrier"})):
             df = component.df
             #drop the standard types to avoid them being read in twice
-            if not ignore_standard_types and component.name in standard_types:
+            if not ignore_standard_types and component.name in self.standard_type_components:
                 df = component.df.drop(network.components[component.name]["standard_types"].index)
 
             import_components_from_dataframe(network, df, component.name)
@@ -630,31 +697,32 @@ class Network(Basic):
         else:
             time_i = slice(None)
 
-        n = self.__class__()
+        override_components, override_component_attrs = self._retrieve_overridden_components()
+        n = self.__class__(override_components=override_components, override_component_attrs=override_component_attrs)
         n.import_components_from_dataframe(
             pd.DataFrame(self.buses.ix[key]).assign(sub_network=""),
             "Bus"
         )
         buses_i = n.buses.index
 
-        rest_components = all_components - standard_types - one_port_components - branch_components
+        rest_components = self.all_components - self.standard_type_components - self.one_port_components - self.branch_components
         for c in rest_components - {"Bus", "SubNetwork"}:
             n.import_components_from_dataframe(pd.DataFrame(self.df(c)), c)
 
-        for c in standard_types:
+        for c in self.standard_type_components:
             df = self.df(c).drop(self.components[c]["standard_types"].index)
             n.import_components_from_dataframe(pd.DataFrame(df), c)
 
-        for c in one_port_components:
+        for c in self.one_port_components:
             df = self.df(c).loc[lambda df: df.bus.isin(buses_i)]
             n.import_components_from_dataframe(pd.DataFrame(df), c)
 
-        for c in branch_components:
+        for c in self.branch_components:
             df = self.df(c).loc[lambda df: df.bus0.isin(buses_i) & df.bus1.isin(buses_i)]
             n.import_components_from_dataframe(pd.DataFrame(df), c)
 
         n.set_snapshots(self.snapshots[time_i])
-        for c in all_components:
+        for c in self.all_components:
             i = n.df(c).index
             try:
                 npnl = n.pnl(c)
@@ -677,23 +745,23 @@ class Network(Basic):
     #beware, this turns bools like s_nom_extendable into objects because of
     #presence of links without s_nom_extendable
     def branches(self):
-        return pd.concat((self.df(c) for c in branch_components),
-                         keys=branch_components)
+        return pd.concat((self.df(c) for c in self.branch_components),
+                         keys=self.branch_components)
 
     def passive_branches(self):
-        return pd.concat((self.df(c) for c in passive_branch_components),
-                         keys=passive_branch_components)
+        return pd.concat((self.df(c) for c in self.passive_branch_components),
+                         keys=self.passive_branch_components)
 
     def controllable_branches(self):
-        return pd.concat((self.df(c) for c in controllable_branch_components),
-                         keys=controllable_branch_components)
+        return pd.concat((self.df(c) for c in self.controllable_branch_components),
+                         keys=self.controllable_branch_components)
 
     def determine_network_topology(self):
         """
         Build sub_networks from topology.
         """
 
-        adjacency_matrix = self.adjacency_matrix(passive_branch_components)
+        adjacency_matrix = self.adjacency_matrix(self.passive_branch_components)
         n_components, labels = csgraph.connected_components(adjacency_matrix, directed=False)
 
         # remove all old sub_networks
@@ -722,12 +790,12 @@ class Network(Basic):
 
         self.buses.loc[:, "sub_network"] = labels.astype(str)
 
-        for c in self.iterate_components(passive_branch_components):
+        for c in self.iterate_components(self.passive_branch_components):
             c.df["sub_network"] = c.df.bus0.map(self.buses["sub_network"])
 
     def iterate_components(self, components=None, skip_empty=True):
         if components is None:
-            components = all_components
+            components = self.all_components
 
         return (Component(name=c,
                           list_name=self.components[c]["list_name"],
@@ -751,13 +819,13 @@ class Network(Basic):
         """
 
 
-        for c in self.iterate_components(one_port_components):
+        for c in self.iterate_components(self.one_port_components):
             missing = c.df.index[~c.df.bus.isin(self.buses.index)]
             if len(missing) > 0:
                 logger.warning("The following %s have buses which are not defined:\n%s",
                                c.list_name, missing)
 
-        for c in self.iterate_components(branch_components):
+        for c in self.iterate_components(self.branch_components):
             for attr in ["bus0","bus1"]:
                 missing = c.df.index[~c.df[attr].isin(self.buses.index)]
                 if len(missing) > 0:
@@ -765,7 +833,7 @@ class Network(Basic):
                                    c.list_name, attr, missing)
 
 
-        for c in self.iterate_components(passive_branch_components):
+        for c in self.iterate_components(self.passive_branch_components):
             for attr in ["x","r"]:
                 bad = c.df.index[c.df[attr] == 0.]
                 if len(bad) > 0:
@@ -785,7 +853,7 @@ class Network(Basic):
                                c.list_name, bad)
 
 
-        for c in self.iterate_components(all_components):
+        for c in self.iterate_components(self.all_components):
             for attr in c.attrs.index[c.attrs.varying & c.attrs.static]:
                 attr_df = c.pnl[attr]
 
@@ -806,7 +874,7 @@ class Network(Basic):
 
         static_attrs = ['p_nom', 's_nom', 'e_nom']
         varying_attrs = ['p_max_pu', 'e_max_pu']
-        for c in self.iterate_components(all_components - {'TransformerType'}):
+        for c in self.iterate_components(self.all_components - {'TransformerType'}):
             varying_attr = c.attrs.index[c.attrs.varying].intersection(varying_attrs)
             static_attr = c.attrs.index[c.attrs.static].intersection(static_attrs)
 
@@ -919,7 +987,7 @@ class SubNetwork(Common):
     def branches_i(self):
         types = []
         names = []
-        for c in self.iterate_components(passive_branch_components):
+        for c in self.iterate_components(self.network.passive_branch_components):
             types += len(c.ind) * [c.name]
             names += list(c.ind)
         return pd.MultiIndex.from_arrays([types, names], names=('type', 'name'))
@@ -969,17 +1037,3 @@ class SubNetwork(Common):
             c = Component(*c[:-1], ind=getattr(self, c.list_name + '_i')())
             if not (skip_empty and len(c.ind) == 0):
                 yield c
-
-
-standard_types = {"LineType", "TransformerType"}
-
-passive_one_port_components = {"ShuntImpedance"}
-controllable_one_port_components = {"Load", "Generator", "StorageUnit", "Store"}
-one_port_components = passive_one_port_components|controllable_one_port_components
-
-passive_branch_components = {"Line", "Transformer"}
-controllable_branch_components = {"Link"}
-branch_components = passive_branch_components|controllable_branch_components
-
-#i.e. everything except "Network"
-all_components = branch_components|one_port_components|standard_types|{"Bus", "SubNetwork", "Carrier", "GlobalConstraint"}

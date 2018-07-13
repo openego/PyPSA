@@ -23,20 +23,45 @@ import numpy as np
 
 from .descriptors import OrderedGraph
 
-def graph(network, branch_components=None, weight=None):
-    """Build networkx graph."""
+def graph(network, branch_components=None, weight=None, inf_weight=False):
+    """
+    Build NetworkX graph.
+
+    Arguments
+    ---------
+    network : Network|SubNetwork
+
+    branch_components : [str]
+        Components to use as branches. The default are
+        passive_branch_components in the case of a SubNetwork and
+        branch_components in the case of a Network.
+
+    weight : str
+        Branch attribute to use as weight
+
+    inf_weight : bool|float
+        How to treat infinite weights (default: False). True keeps the infinite
+        weight. False skips edges with infinite weight. If a float is given it
+        is used instead.
+
+    Returns
+    -------
+    graph : OrderedGraph
+        NetworkX graph
+    """
+
     from . import components
 
     if isinstance(network, components.Network):
         if branch_components is None:
-            branch_components = components.branch_components
+            branch_components = network.branch_components
         buses_i = network.buses.index
     elif isinstance(network, components.SubNetwork):
         if branch_components is None:
-            branch_components = components.passive_branch_components
+            branch_components = network.network.passive_branch_components
         buses_i = network.buses_i()
     else:
-        raise TypeError("build_graph must be called with a Network or a SubNetwork")
+        raise TypeError("graph must be called with a Network or a SubNetwork")
 
     graph = OrderedGraph()
 
@@ -52,7 +77,11 @@ def graph(network, branch_components=None, weight=None):
                     data = {}
                 else:
                     data = dict(weight=getattr(branch, weight))
-                    if np.isinf(data['weight']): continue
+                    if np.isinf(data['weight']) and inf_weight is not True:
+                        if inf_weight is False:
+                            continue
+                        else:
+                            data['weight'] = inf_weight
 
                 yield (branch.bus0, branch.bus1, (c.name, branch.Index), data)
 
@@ -81,16 +110,17 @@ def adjacency_matrix(network, branch_components=None, busorder=None, weights=Non
     adjacency_matrix : sp.sparse.coo_matrix
        Directed adjacency matrix
     """
+
     from . import components
 
     if isinstance(network, components.Network):
         if branch_components is None:
-            branch_components = components.branch_components
+            branch_components = network.branch_components
         if busorder is None:
             busorder = network.buses.index
     elif isinstance(network, components.SubNetwork):
         if branch_components is None:
-            branch_components = components.passive_branch_components
+            branch_components = network.network.passive_branch_components
         if busorder is None:
             busorder = network.buses_i()
     else:
@@ -106,7 +136,7 @@ def adjacency_matrix(network, branch_components=None, busorder=None, weights=Non
             sel = slice(None)
             no_branches = len(c.df)
         else:
-            sel = t.ind
+            sel = c.ind
             no_branches = len(c.ind)
         bus0_inds.append(busorder.get_indexer(c.df.loc[sel, "bus0"]))
         bus1_inds.append(busorder.get_indexer(c.df.loc[sel, "bus1"]))
@@ -146,12 +176,12 @@ def incidence_matrix(network, branch_components=None, busorder=None):
 
     if isinstance(network, components.Network):
         if branch_components is None:
-            branch_components = components.branch_components
+            branch_components = network.branch_components
         if busorder is None:
             busorder = network.buses.index
     elif isinstance(network, components.SubNetwork):
         if branch_components is None:
-            branch_components = components.passive_branch_components
+            branch_components = network.network.passive_branch_components
         if busorder is None:
             busorder = network.buses_i()
     else:

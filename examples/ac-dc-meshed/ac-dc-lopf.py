@@ -29,9 +29,7 @@ print(network.links)
 
 now = network.snapshots[5]
 
-print("\nCheck power balance at each branch:")
-
-branches = network.branches()
+print("\nCheck power balance at each bus:")
 
 for bus in network.buses.index:
     print("\n"*3+bus)
@@ -44,7 +42,7 @@ for bus in network.buses.index:
     p0 = 0.
     p1 = 0.
 
-    for c in network.iterate_components(pypsa.components.branch_components):
+    for c in network.iterate_components(network.branch_components):
 
         bs = (c.df.bus0 == bus)
 

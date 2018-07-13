@@ -1,6 +1,6 @@
 
 
-## Copyright 2015-2017 Tom Brown (FIAS), Jonas Hoersch (FIAS)
+## Copyright 2015-2018 Tom Brown (FIAS), Jonas Hoersch (FIAS)
 
 ## This program is free software; you can redistribute it and/or
 ## modify it under the terms of the GNU General Public License as
@@ -37,13 +37,12 @@ __copyright__ = "Copyright 2015-2017 Tom Brown (FIAS), Jonas Hoersch (FIAS), GNU
 from weakref import WeakKeyDictionary
 
 from collections import OrderedDict
+from itertools import repeat
 
 import networkx as nx
 import pandas as pd
 import numpy as np
 import re
-
-import inspect
 
 import logging
 logger = logging.getLogger(__name__)
@@ -89,6 +88,13 @@ elif _nx_version >= '1.10':
                     nx.convert.to_networkx_graph(data, create_using=self)
 else:
     raise ImportError("NetworkX version {} is too old. At least 1.10 is needed.".format(nx.__version__))
+
+if _nx_version >= '2.0':
+    def degree(G):
+        return G.degree()
+else:
+    def degree(G):
+        return G.degree_iter()
 
 class Dict(dict):
     """
@@ -154,6 +160,8 @@ def get_switchable_as_dense(network, component, attr, snapshots=None, inds=None)
     network : pypsa.Network
     component : string
         Component object name, e.g. 'Generator' or 'Link'
+    attr : string
+        Attribute name
     snapshots : pandas.Index
         Restrict to these snapshots rather than network.snapshots.
     inds : pandas.Index
@@ -173,6 +181,7 @@ def get_switchable_as_dense(network, component, attr, snapshots=None, inds=None)
     pnl = network.pnl(component)
 
     index = df.index
+
     varying_i = pnl[attr].columns
     fixed_i = df.index.difference(varying_i)
 
@@ -187,6 +196,62 @@ def get_switchable_as_dense(network, component, attr, snapshots=None, inds=None)
                      index=snapshots, columns=fixed_i),
         pnl[attr].loc[snapshots, varying_i]
     ], axis=1).reindex(columns=index))
+
+def get_switchable_as_iter(network, component, attr, snapshots, inds=None):
+    """
+    Return an iterator over snapshots for a time-varying component
+    attribute with values for all non-time-varying components filled
+    in with the default values for the attribute.
+
+    Parameters
+    ----------
+    network : pypsa.Network
+    component : string
+        Component object name, e.g. 'Generator' or 'Link'
+    attr : string
+        Attribute name
+    snapshots : pandas.Index
+        Restrict to these snapshots rather than network.snapshots.
+    inds : pandas.Index
+        Restrict to these items rather than all of network.{generators,..}.index
+
+    Returns
+    -------
+    pandas.DataFrame
+
+    Examples
+    --------
+    >>> get_switchable_as_iter(network, 'Generator', 'p_max_pu', snapshots)
+
+"""
+
+    df = network.df(component)
+    pnl = network.pnl(component)
+
+    index = df.index
+    varying_i = pnl[attr].columns
+    fixed_i = df.index.difference(varying_i)
+
+    if inds is not None:
+        inds = pd.Index(inds)
+        index = inds.intersection(index)
+        varying_i = inds.intersection(varying_i)
+        fixed_i = inds.intersection(fixed_i)
+
+    # Short-circuit only fixed
+    if len(varying_i) == 0:
+        return repeat(df.loc[fixed_i, attr], len(snapshots))
+
+    def is_same_indices(i1, i2): return len(i1) == len(i2) and (i1 == i2).all()
+    if is_same_indices(fixed_i.append(varying_i), index):
+        def reindex_maybe(s): return s
+    else:
+        def reindex_maybe(s): return s.reindex(index)
+
+    return (
+        reindex_maybe(df.loc[fixed_i, attr].append(pnl[attr].loc[sn, varying_i]))
+        for sn in snapshots
+    )
 
 
 def allocate_series_dataframes(network, series):
@@ -218,3 +283,23 @@ def allocate_series_dataframes(network, series):
         for attr in attributes:
             pnl[attr] = pnl[attr].reindex(columns=df.index,
                                           fill_value=network.components[component]["attrs"].at[attr,"default"])
+
+def free_output_series_dataframes(network, components=None):
+    if components is None:
+        components = network.all_components
+
+    for component in components:
+        attrs = network.components[component]['attrs']
+        pnl = network.pnl(component)
+
+        for attr in attrs.index[attrs['varying'] & (attrs['status'] == 'Output')]:
+            pnl[attr] = pd.DataFrame(index=network.snapshots, columns=[])
+
+def zsum(s, *args, **kwargs):
+    """
+    pandas 0.21.0 changes sum() behavior so that the result of applying sum
+    over an empty DataFrame is NaN.
+
+    Meant to be set as pd.Series.zsum = zsum.
+    """
+    return 0 if s.empty else s.sum(*args, **kwargs)

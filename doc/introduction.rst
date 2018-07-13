@@ -8,12 +8,12 @@ PyPSA is a `free software
 <http://www.gnu.org/philosophy/free-sw.en.html>`_ toolbox for
 simulating and optimising modern power systems that include features
 such as conventional generators with unit commitment, variable wind
-and solar generation, storage units, sector coupling and mixed
-alternating and direct current networks.  PyPSA is designed to scale
-well with large networks and long time series.
+and solar generation, storage units, coupling to other energy sectors,
+and mixed alternating and direct current networks.  PyPSA is designed
+to scale well with large networks and long time series.
 
 
-As of 2017 PyPSA is under heavy development and therefore it is
+As of 2018 PyPSA is under heavy development and therefore it is
 recommended to use caution when using it in a production
 environment. Some APIs may change - the changes in each PyPSA version
 are listed in the :doc:`release_notes`.
@@ -32,14 +32,14 @@ PyPSA can calculate:
 
 * static power flow (using both the full non-linear network equations and
   the linearised network equations)
-* linear optimal power flow (optimisation of power plant and storage
+* linear optimal power flow (least-cost optimisation of power plant and storage
   dispatch within network constraints, using the linear network
   equations, over several snapshots)
 * security-constrained linear optimal power flow
-* total electricity system investment optimisation (using linear
+* total electricity/energy system least-cost investment optimisation (using linear
   network equations, over several snapshots simultaneously for
   optimisation of generation and storage dispatch and investment in
-  the capacities of generation, storage and transmission)
+  the capacities of generation, storage, transmission and other infrastructure)
 
 It has models for:
 
@@ -92,6 +92,17 @@ available as Jupyter notebooks. They are also described in the
 
 Screenshots
 ===========
+
+
+Results from a PyPSA simulation can be converted into an interactive
+online animation using `PyPSA-animation
+<https://github.com/PyPSA/PyPSA-animation>`_, see the `PyPSA-Eur-30
+example <https://www.pypsa.org/animations/pypsa-eur-30/>`_.
+
+Another showcase for PyPSA is the `SciGRID example
+<https://pypsa.org/examples/scigrid-lopf-then-pf-plotly.html>`_ which
+demonstrates interactive plots generated with the `plotly
+<https://plot.ly/python/>`_ library.
 
 
 .. image:: img/line-loading.png
@@ -187,15 +198,32 @@ PyPSA has a Google Group `forum / mailing list
 Citing PyPSA
 ============
 
-
-
 If you use PyPSA for your research, we would appreciate it if you
-would cite the following preprint paper (which has not yet been
-through peer review):
+would cite the following paper:
 
 * T. Brown, J. Hörsch, D. Schlachtberger, `PyPSA: Python for Power
-  System Analysis <https://arxiv.org/abs/1707.09913>`_, 2017,
-  `preprint arXiv:1707.09913 <https://arxiv.org/abs/1707.09913>`_
+  System Analysis <https://arxiv.org/abs/1707.09913>`_, 2018,
+  `Journal of Open Research Software
+  <https://openresearchsoftware.metajnl.com/>`_, 6(1),
+  `arXiv:1707.09913 <https://arxiv.org/abs/1707.09913>`_,
+  `DOI:10.5334/jors.188 <https://doi.org/10.5334/jors.188>`_
+
+Please use the following BibTeX: ::
+
+   @article{PyPSA,
+      author = {T. Brown and J. H\"orsch and D. Schlachtberger},
+      title = {{PyPSA: Python for Power System Analysis}},
+      journal = {Journal of Open Research Software},
+      volume = {6},
+      issue = {1},
+      number = {4},
+      year = {2018},
+      eprint = {1707.09913},
+      url = {https://doi.org/10.5334/jors.188},
+      doi = {10.5334/jors.188}
+   }
+
+
 
 
 If you want to cite a specific PyPSA version, each release of PyPSA is
