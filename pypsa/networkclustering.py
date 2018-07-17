@@ -119,6 +119,7 @@ def aggregateoneport(network, busmap, component, with_time=True):
 			         if attr in {'p_min_pu'}
 
 			         else _consense)
+                
 
 
                   for attr in columns}
