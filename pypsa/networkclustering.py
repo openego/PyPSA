@@ -74,7 +74,7 @@ def aggregategenerators(network, busmap, with_time=True):
     weighting = generators.weight.groupby(grouper, axis=0).transform(lambda x: (x/x.sum()).fillna(1.))
     generators['p_nom_max'] /= weighting
 
-    strategies = {'p_nom_min':np.min,'p_nom_max': np.min, 'weight': np.sum, 'p_nom': np.sum,
+    strategies = {'p_nom_min':np.min,'p_nom_max': np.min, 'weight': np.sum, 'p_nom': np.sum, 'p_nom_opt': np.sum,
                   'marginal_cost': np.mean, 'capital_cost': np.mean}
     strategies.update(zip(columns.difference(strategies), repeat(_consense)))
  
@@ -108,8 +108,8 @@ def aggregateoneport(network, busmap, component, with_time=True):
         grouper = old_df.bus
 
     strategies = {attr: (np.sum
-                         if attr in {'p', 'q', 'p_set', 'q_set',
-                                     'p_nom', 'p_nom_max', 'p_nom_min'}
+                         if attr in {'p', 'q', 'p_set', 'q_set', 'state_of_charge',
+                                     'p_nom', 'p_nom_max', 'p_nom_min', 'p_nom_opt'}
 
                          else np.mean
                          if attr in {'marginal_cost', 'capital_cost', 'efficiency',
@@ -143,6 +143,10 @@ def aggregateoneport(network, busmap, component, with_time=True):
         for attr, df in iteritems(old_pnl):
             if not df.empty:
                 pnl_df = df.groupby(grouper, axis=1).sum()
+                
+                if 'max_hours' in columns:
+                    pnl_df.columns.set_levels(pnl_df.columns.levels[2].astype(object), level=2, inplace=True)
+                    pnl_df.columns.set_levels(pnl_df.columns.levels[2].astype(str), level=2, inplace=True)
                 pnl_df.columns = _flatten_multiindex(pnl_df.columns).rename("name")
                 new_pnl[attr] = pnl_df
 
@@ -247,7 +251,7 @@ def get_clustering_from_busmap(network, busmap, with_time=True, line_length_fact
                                aggregate_generators_weighted=False, aggregate_one_ports={},
                                bus_strategies=dict()):
 
-    buses, linemap, linemap_p, linemap_n, lines = get_buses_linemap_and_lines(network, busmap, line_length_factor, bus_strategies)
+    buses, linemap, linemap_p, linemap_n, lines  = get_buses_linemap_and_lines(network, busmap, line_length_factor, bus_strategies)
 
     network_c = Network()
 
@@ -385,7 +389,7 @@ try:
     # available using pip as scikit-learn
     from sklearn.cluster import KMeans
 
-    def busmap_by_kmeans(network, bus_weightings, n_clusters, buses_i=None, ** kwargs):
+    def busmap_by_kmeans(network, bus_weightings, n_clusters, buses_i=None, load_cluster=False, ** kwargs):
         """
         Create a bus map from the clustering of buses in space with a
         weighting.
@@ -417,9 +421,15 @@ try:
         points = (network.buses.loc[buses_i, ["x","y"]].values
                   .repeat(bus_weightings.reindex(buses_i).astype(int), axis=0))
 
-        kmeans = KMeans(init='k-means++', n_clusters=n_clusters, ** kwargs)
-
-        kmeans.fit(points)
+        #optional load of cluster coordinates
+        if load_cluster != False:
+            busmap_array = np.loadtxt(load_cluster)
+            kmeans = KMeans(init=busmap_array, n_clusters=n_clusters, ** kwargs)
+            kmeans.fit(points)
+        else:
+            kmeans = KMeans(init='k-means++', n_clusters=n_clusters, ** kwargs)
+            kmeans.fit(points)
+            np.savetxt("cluster_coord_k_%i_result" % (n_clusters), kmeans.cluster_centers_)
 
         busmap = pd.Series(data=kmeans.predict(network.buses.loc[buses_i, ["x","y"]]),
                            index=buses_i).astype(str)
