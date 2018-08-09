@@ -191,16 +191,16 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
         length_s = _haversine(buses.loc[list(l.name),['x', 'y']])*line_length_factor
         v_nom_s = buses.loc[list(l.name),'v_nom'].max()
 
-        voltage_factor = (np.asarray(network.buses.loc[l.bus0,'v_nom'])/v_nom_s)**2        
+        voltage_factor = (np.asarray(network.buses.loc[l.bus0,'v_nom'])/v_nom_s)**2
         length_factor = (length_s/l['length'])
-      
+
         if l['s_nom_extendable'].any():
-            costs =  np.average(l['capital_cost'][l.s_nom_extendable ==True] *\
-                length_factor[l.s_nom_extendable ==True],\
-                weights= l['s_nom'][l.s_nom_extendable ==True])
+            costs = np.average(l['capital_cost'][l.s_nom_extendable is True] *
+                length_factor[l.s_nom_extendable is True],
+                weights=l['s_nom'][l.s_nom_extendable is True])
         else:
             costs = 0
-       
+
         data = dict(
             r=1./(voltage_factor/(length_factor * l['r'])).sum(),
             x=1./(voltage_factor/(length_factor * l['x'])).sum(),
@@ -210,19 +210,20 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
             s_nom=l['s_nom'].sum(),
             s_nom_min=l['s_nom_min'].sum(),
             s_nom_max=l['s_nom_max'].sum(),
-            s_nom_extendable= l['s_nom_extendable'].any(),
-            capital_cost= costs,
+            s_nom_extendable=l['s_nom_extendable'].any(),
+            capital_cost=costs,
             length=length_s,
             sub_network=consense['sub_network'](l['sub_network']),
             v_ang_min=l['v_ang_min'].max(),
             v_ang_max=l['v_ang_max'].min()
         )
+
         data.update((f, consense[f](l[f])) for f in columns.difference(data))
         return pd.Series(data, index=[f for f in l.columns if f in columns])
 
-    #import pdb; pdb.set_trace()
     lines = interlines_c.groupby(['bus0_s', 'bus1_s']).apply(aggregatelinegroup)
     lines['name'] = [str(i+1) for i in range(len(lines))]
+    
 
     linemap_p = interlines_p.join(lines['name'], on=['bus0_s', 'bus1_s'])['name']
     linemap_n = interlines_n.join(lines['name'], on=['bus0_s', 'bus1_s'])['name']
