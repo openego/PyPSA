@@ -423,7 +423,8 @@ try:
             kmeans = KMeans(init=busmap_array, n_clusters=n_clusters, ** kwargs)
             kmeans.fit(points)
         else:
-            kmeans = KMeans(init='k-means++', n_clusters=n_clusters, ** kwargs)
+            #kmeans = KMeans(init='k-means++', n_clusters=n_clusters, ** kwargs)
+            kmeans = KMeans(init='k-means++', n_clusters=n_clusters, n_init=100, max_iter=1000, tol=1e-6, n_jobs=8, ** kwargs)
             kmeans.fit(points)
             np.savetxt("cluster_coord_k_%i_result" % (n_clusters), kmeans.cluster_centers_)
 
