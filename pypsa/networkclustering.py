@@ -420,10 +420,10 @@ try:
         #optional load of cluster coordinates
         if load_cluster != False:
             busmap_array = np.loadtxt(load_cluster)
-            kmeans = KMeans(init=busmap_array, n_clusters=n_clusters, ** kwargs)
+            kmeans = KMeans(init=busmap_array, n_clusters=n_clusters, n_init=n_init, max_iter=max_iter, tol=tol, n_jobs=n_jobs, ** kwargs)
             kmeans.fit(points)
         else:
-            kmeans = KMeans(init='k-means++', n_clusters=n_clusters, ** kwargs)
+            kmeans = KMeans(init='k-means++', n_clusters=n_clusters, n_init=n_init, max_iter=max_iter, tol=tol, n_jobs=n_jobs, ** kwargs)
             kmeans.fit(points)
             np.savetxt("cluster_coord_k_%i_result" % (n_clusters), kmeans.cluster_centers_)
 
