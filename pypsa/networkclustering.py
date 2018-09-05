@@ -426,7 +426,7 @@ try:
             kmeans = KMeans(init='k-means++', n_clusters=n_clusters, n_init=n_init, max_iter=max_iter, tol=tol, n_jobs=n_jobs, ** kwargs)
             kmeans.fit(points)
             np.savetxt("cluster_coord_k_%i_result" % (n_clusters), kmeans.cluster_centers_)
-        print("Inertia = ", kmeans.inertia_)
+        print("Inertia of k-means = ", kmeans.inertia_)
         busmap = pd.Series(data=kmeans.predict(network.buses.loc[buses_i, ["x","y"]]),
                            index=buses_i).astype(str)
 
