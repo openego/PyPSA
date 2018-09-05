@@ -199,9 +199,9 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
         length_factor = (length_s/l['length'])
 
         if l['s_nom_extendable'].any():
-            costs = np.average(l['capital_cost'][l.s_nom_extendable is True] *
-                length_factor[l.s_nom_extendable is True],
-                weights=l['s_nom'][l.s_nom_extendable is True])
+            costs = np.average(l['capital_cost'][l.s_nom_extendable] *
+                length_factor[l.s_nom_extendable],
+                weights=l['s_nom'][l.s_nom_extendable])
         else:
             costs = 0
 
