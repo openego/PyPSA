@@ -221,13 +221,11 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
             v_ang_min=l['v_ang_min'].max(),
             v_ang_max=l['v_ang_max'].min()
         )
-
         data.update((f, consense[f](l[f])) for f in columns.difference(data))
         return pd.Series(data, index=[f for f in l.columns if f in columns])
 
     lines = interlines_c.groupby(['bus0_s', 'bus1_s']).apply(aggregatelinegroup)
     lines['name'] = [str(i+1) for i in range(len(lines))]
-    
 
     linemap_p = interlines_p.join(lines['name'], on=['bus0_s', 'bus1_s'])['name']
     linemap_n = interlines_n.join(lines['name'], on=['bus0_s', 'bus1_s'])['name']
@@ -260,7 +258,7 @@ def get_clustering_from_busmap(network, busmap, with_time=True, line_length_fact
                                aggregate_generators_weighted=False, aggregate_one_ports={},
                                bus_strategies=dict()):
 
-    buses, linemap, linemap_p, linemap_n, lines  = get_buses_linemap_and_lines(network, busmap, line_length_factor, bus_strategies)
+    buses, linemap, linemap_p, linemap_n, lines = get_buses_linemap_and_lines(network, busmap, line_length_factor, bus_strategies)
 
     network_c = Network()
 
@@ -269,6 +267,7 @@ def get_clustering_from_busmap(network, busmap, with_time=True, line_length_fact
 
     if with_time:
         network_c.set_snapshots(network.snapshots)
+        network_c.snapshot_weightings = network.snapshot_weightings.copy()
 
     one_port_components = components.one_port_components.copy()
 
