@@ -74,7 +74,7 @@ def aggregategenerators(network, busmap, with_time=True):
     weighting = generators.weight.groupby(grouper, axis=0).transform(lambda x: (x/x.sum()).fillna(1.))
     generators['p_nom_max'] /= weighting
 
-    strategies = {'p_nom_min':np.min,'p_nom_max': np.min, 'weight': np.sum, 'p_nom': np.sum,
+    strategies = {'p_nom_min':np.min,'p_nom_max': np.min, 'weight': np.sum, 'p_nom': np.sum, 'p_nom_opt': np.sum,
                   'marginal_cost': np.mean, 'capital_cost': np.mean}
     strategies.update(zip(columns.difference(strategies), repeat(_consense)))
  
@@ -108,8 +108,8 @@ def aggregateoneport(network, busmap, component, with_time=True):
         grouper = old_df.bus
 
     strategies = {attr: (np.sum
-                         if attr in {'p', 'q', 'p_set', 'q_set',
-                                     'p_nom', 'p_nom_max', 'p_nom_min'}
+                         if attr in {'p', 'q', 'p_set', 'q_set', 'state_of_charge',
+                                     'p_nom', 'p_nom_max', 'p_nom_min', 'p_nom_opt'}
 
                          else np.mean
                          if attr in {'marginal_cost', 'capital_cost', 'efficiency',
@@ -143,6 +143,10 @@ def aggregateoneport(network, busmap, component, with_time=True):
         for attr, df in iteritems(old_pnl):
             if not df.empty:
                 pnl_df = df.groupby(grouper, axis=1).sum()
+                
+                if 'max_hours' in columns:
+                    pnl_df.columns.set_levels(pnl_df.columns.levels[2].astype(object), level=2, inplace=True)
+                    pnl_df.columns.set_levels(pnl_df.columns.levels[2].astype(str), level=2, inplace=True)
                 pnl_df.columns = _flatten_multiindex(pnl_df.columns).rename("name")
                 new_pnl[attr] = pnl_df
 
@@ -195,9 +199,9 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
         length_factor = (length_s/l['length'])
 
         if l['s_nom_extendable'].any():
-            costs = np.average(l['capital_cost'][l.s_nom_extendable is True] *
-                length_factor[l.s_nom_extendable is True],
-                weights=l['s_nom'][l.s_nom_extendable is True])
+            costs = np.average(l['capital_cost'][l.s_nom_extendable] *
+                length_factor[l.s_nom_extendable],
+                weights=l['s_nom'][l.s_nom_extendable])
         else:
             costs = 0
 
@@ -217,13 +221,11 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
             v_ang_min=l['v_ang_min'].max(),
             v_ang_max=l['v_ang_max'].min()
         )
-
         data.update((f, consense[f](l[f])) for f in columns.difference(data))
         return pd.Series(data, index=[f for f in l.columns if f in columns])
 
     lines = interlines_c.groupby(['bus0_s', 'bus1_s']).apply(aggregatelinegroup)
     lines['name'] = [str(i+1) for i in range(len(lines))]
-    
 
     linemap_p = interlines_p.join(lines['name'], on=['bus0_s', 'bus1_s'])['name']
     linemap_n = interlines_n.join(lines['name'], on=['bus0_s', 'bus1_s'])['name']
