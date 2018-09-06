@@ -198,6 +198,13 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
         voltage_factor = (np.asarray(network.buses.loc[l.bus0,'v_nom'])/v_nom_s)**2
         length_factor = (length_s/l['length'])
 
+        if l['s_nom_extendable'].any():
+            costs = np.average(l['capital_cost'][l.s_nom_extendable] *
+                length_factor[l.s_nom_extendable],
+                weights=l['s_nom'][l.s_nom_extendable])
+        else:
+            costs = 0
+
         data = dict(
             r=1./(voltage_factor/(length_factor * l['r'])).sum(),
             x=1./(voltage_factor/(length_factor * l['x'])).sum(),
@@ -208,7 +215,7 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
             s_nom_min=l['s_nom_min'].sum(),
             s_nom_max=l['s_nom_max'].sum(),
             s_nom_extendable=l['s_nom_extendable'].any(),
-            capital_cost=l['capital_cost'].sum(),
+            capital_cost=costs,
             length=length_s,
             sub_network=consense['sub_network'](l['sub_network']),
             v_ang_min=l['v_ang_min'].max(),
@@ -260,6 +267,7 @@ def get_clustering_from_busmap(network, busmap, with_time=True, line_length_fact
 
     if with_time:
         network_c.set_snapshots(network.snapshots)
+        network_c.snapshot_weightings = network.snapshot_weightings.copy()
 
     one_port_components = components.one_port_components.copy()
 
@@ -389,7 +397,7 @@ try:
     # available using pip as scikit-learn
     from sklearn.cluster import KMeans
 
-    def busmap_by_kmeans(network, bus_weightings, n_clusters, buses_i=None, load_cluster=False, ** kwargs):
+    def busmap_by_kmeans(network, bus_weightings, n_clusters, buses_i=None, load_cluster=False, n_init=10, max_iter=300, tol=1e-6, n_jobs=1, ** kwargs):
         """
         Create a bus map from the clustering of buses in space with a
         weighting.
@@ -424,13 +432,13 @@ try:
         #optional load of cluster coordinates
         if load_cluster != False:
             busmap_array = np.loadtxt(load_cluster)
-            kmeans = KMeans(init=busmap_array, n_clusters=n_clusters, ** kwargs)
+            kmeans = KMeans(init=busmap_array, n_clusters=n_clusters, n_init=n_init, max_iter=max_iter, tol=tol, n_jobs=n_jobs, ** kwargs)
             kmeans.fit(points)
         else:
-            kmeans = KMeans(init='k-means++', n_clusters=n_clusters, ** kwargs)
+            kmeans = KMeans(init='k-means++', n_clusters=n_clusters, n_init=n_init, max_iter=max_iter, tol=tol, n_jobs=n_jobs, ** kwargs)
             kmeans.fit(points)
             np.savetxt("cluster_coord_k_%i_result" % (n_clusters), kmeans.cluster_centers_)
-
+        print("Inertia of k-means = ", kmeans.inertia_)
         busmap = pd.Series(data=kmeans.predict(network.buses.loc[buses_i, ["x","y"]]),
                            index=buses_i).astype(str)
 
