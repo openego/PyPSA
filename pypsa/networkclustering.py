@@ -74,7 +74,7 @@ def aggregategenerators(network, busmap, with_time=True):
     weighting = generators.weight.groupby(grouper, axis=0).transform(lambda x: (x/x.sum()).fillna(1.))
     generators['p_nom_max'] /= weighting
 
-    strategies = {'p_nom_max': np.min, 'weight': np.sum, 'p_nom': np.sum,
+    strategies = {'p_nom_min':np.min,'p_nom_max': np.min, 'weight': np.sum, 'p_nom': np.sum, 'p_nom_opt': np.sum,
                   'marginal_cost': np.mean, 'capital_cost': np.mean}
     strategies.update(zip(columns.difference(strategies), repeat(_consense)))
  
@@ -100,30 +100,40 @@ def aggregateoneport(network, busmap, component, with_time=True):
 
     columns = set(attrs.index[attrs.static]) & set(old_df.columns)
 
-    if 'max_hours' in columns:
-        grouper = [old_df.bus, old_df.max_hours]
-    elif 'carrier' in columns:
+    if ('carrier' in columns and 'max_hours' in columns):
+        grouper = [old_df.bus, old_df.carrier, old_df.max_hours]
+    elif ('carrier' in columns and not 'max_hours' in columns):
         grouper = [old_df.bus, old_df.carrier]
     else:
         grouper = old_df.bus
 
     strategies = {attr: (np.sum
-                         if attr in {'p', 'q', 'p_set', 'q_set',
-                                     'p_nom', 'p_nom_max', 'p_nom_min'}
+                         if attr in {'p', 'q', 'p_set', 'q_set', 'state_of_charge',
+                                     'p_nom', 'p_nom_max', 'p_nom_min', 'p_nom_opt'}
 
                          else np.mean
                          if attr in {'marginal_cost', 'capital_cost', 'efficiency',
                                      'efficiency_dispatch', 'standing_loss', 'efficiency_store'}
-                         else _consense)
+                         
+			         else np.min
+			         if attr in {'p_min_pu'}
+
+			         else _consense)
 
 
                   for attr in columns}
+
     new_df = old_df.groupby(grouper).agg(strategies)
 
     if 'max_hours' in columns:
-        new_df.index.set_levels(new_df.index.get_level_values('max_hours').\
-                                astype('object').astype('str'),
-                                level='max_hours', inplace=True)
+        # index level max_hours is of type numeric.Float64Index, that cannot
+        # be handled by _flatten_multiindex, other indices are of type
+        # base.Index, thus we have to convert the datatype of max_hours. There
+        # might be a better way to do it inplace instead of reconstructing the
+        # Index.
+        new_df.reset_index(drop=True, inplace=True)
+        new_df.max_hours = new_df.max_hours.astype('str')
+        new_df.set_index(['bus', 'carrier', 'max_hours'])
 
     new_df.index = _flatten_multiindex(new_df.index).rename("name")
 
@@ -133,6 +143,10 @@ def aggregateoneport(network, busmap, component, with_time=True):
         for attr, df in iteritems(old_pnl):
             if not df.empty:
                 pnl_df = df.groupby(grouper, axis=1).sum()
+                
+                if 'max_hours' in columns:
+                    pnl_df.columns.set_levels(pnl_df.columns.levels[2].astype(object), level=2, inplace=True)
+                    pnl_df.columns.set_levels(pnl_df.columns.levels[2].astype(str), level=2, inplace=True)
                 pnl_df.columns = _flatten_multiindex(pnl_df.columns).rename("name")
                 new_pnl[attr] = pnl_df
 
@@ -184,6 +198,13 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
         voltage_factor = (np.asarray(network.buses.loc[l.bus0,'v_nom'])/v_nom_s)**2
         length_factor = (length_s/l['length'])
 
+        if l['s_nom_extendable'].any():
+            costs = np.average(l['capital_cost'][l.s_nom_extendable] *
+                length_factor[l.s_nom_extendable],
+                weights=l['s_nom'][l.s_nom_extendable])
+        else:
+            costs = 0
+
         data = dict(
             r=1./(voltage_factor/(length_factor * l['r'])).sum(),
             x=1./(voltage_factor/(length_factor * l['x'])).sum(),
@@ -194,7 +215,7 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
             s_nom_min=l['s_nom_min'].sum(),
             s_nom_max=l['s_nom_max'].sum(),
             s_nom_extendable=l['s_nom_extendable'].any(),
-            capital_cost=l['capital_cost'].sum(),
+            capital_cost=costs,
             length=length_s,
             sub_network=consense['sub_network'](l['sub_network']),
             v_ang_min=l['v_ang_min'].max(),
@@ -246,6 +267,7 @@ def get_clustering_from_busmap(network, busmap, with_time=True, line_length_fact
 
     if with_time:
         network_c.set_snapshots(network.snapshots)
+        network_c.snapshot_weightings = network.snapshot_weightings.copy()
 
     one_port_components = components.one_port_components.copy()
 
@@ -375,7 +397,7 @@ try:
     # available using pip as scikit-learn
     from sklearn.cluster import KMeans
 
-    def busmap_by_kmeans(network, bus_weightings, n_clusters, buses_i=None, ** kwargs):
+    def busmap_by_kmeans(network, bus_weightings, n_clusters, buses_i=None, load_cluster=False, n_init=10, max_iter=300, tol=1e-6, n_jobs=1, ** kwargs):
         """
         Create a bus map from the clustering of buses in space with a
         weighting.
@@ -407,10 +429,16 @@ try:
         points = (network.buses.loc[buses_i, ["x","y"]].values
                   .repeat(bus_weightings.reindex(buses_i).astype(int), axis=0))
 
-        kmeans = KMeans(init='k-means++', n_clusters=n_clusters, ** kwargs)
-
-        kmeans.fit(points)
-
+        #optional load of cluster coordinates
+        if load_cluster != False:
+            busmap_array = np.loadtxt(load_cluster)
+            kmeans = KMeans(init=busmap_array, n_clusters=n_clusters, n_init=n_init, max_iter=max_iter, tol=tol, n_jobs=n_jobs, ** kwargs)
+            kmeans.fit(points)
+        else:
+            kmeans = KMeans(init='k-means++', n_clusters=n_clusters, n_init=n_init, max_iter=max_iter, tol=tol, n_jobs=n_jobs, ** kwargs)
+            kmeans.fit(points)
+            np.savetxt("cluster_coord_k_%i_result" % (n_clusters), kmeans.cluster_centers_)
+        print("Inertia of k-means = ", kmeans.inertia_)
         busmap = pd.Series(data=kmeans.predict(network.buses.loc[buses_i, ["x","y"]]),
                            index=buses_i).astype(str)
 
