@@ -110,7 +110,7 @@ def aggregateoneport(network, busmap, component, with_time=True):
     strategies = {attr: (np.sum
                          if attr in {'p', 'q', 'p_set', 'q_set', 'state_of_charge',
                                      'p_nom', 'p_nom_max', 'p_nom_min', 'p_nom_opt'}
-
+                         
                          else np.mean
                          if attr in {'marginal_cost', 'capital_cost', 'efficiency',
                                      'efficiency_dispatch', 'standing_loss', 'efficiency_store'}
@@ -118,8 +118,12 @@ def aggregateoneport(network, busmap, component, with_time=True):
 			         else np.min
 			         if attr in {'p_min_pu'}
 
-			         else _consense)
+			        else np.any
+			         if attr in {'p_nom_extendable'}
+                         
+			         else _consense
 
+                         )
 
                   for attr in columns}
 
