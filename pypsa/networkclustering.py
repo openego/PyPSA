@@ -215,6 +215,7 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
             s_nom_min=l['s_nom_min'].sum(),
             s_nom_max=l['s_nom_max'].sum(),
             s_nom_extendable=l['s_nom_extendable'].any(),
+            s_nom_total = l['s_nom_total'].sum(),
             capital_cost=costs,
             length=length_s,
             sub_network=consense['sub_network'](l['sub_network']),
