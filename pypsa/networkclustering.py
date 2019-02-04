@@ -80,7 +80,8 @@ def aggregategenerators(network, busmap, with_time=True, carriers=None, custom_s
 
     weighting = generators.weight.groupby(grouper, axis=0).transform(lambda x: (x/x.sum()).fillna(1.))
     generators['capital_cost'] *= weighting
-    strategies = {'p_nom_max': np.min, 'weight': np.sum, 'p_nom': np.sum, 'capital_cost': np.sum}
+    strategies = {'p_nom_min':np.min,'p_nom_max': np.min, 'weight': np.sum, 'p_nom': np.sum, 'p_nom_opt': np.sum,
+                  'marginal_cost': np.mean, 'capital_cost': np.mean}
     strategies.update(custom_strategies)
     if strategies['p_nom_max'] is np.min:
         generators['p_nom_max'] /= weighting
@@ -126,6 +127,10 @@ def aggregateoneport(network, busmap, component, with_time=True, custom_strategi
     strategies = {attr: default_strategies.get(attr, _make_consense(component, attr))
                   for attr in columns}
     strategies.update(custom_strategies)
+    if 'efficiency_dispatch' in columns:
+        strategies.update({'efficiency_dispatch':np.mean, 'standing_loss':np.mean, 'efficiency_store':np.mean})
+    if 'capital_cost' in columns:
+        strategies.update({'capital_cost':np.mean})
     new_df = old_df.groupby(grouper).agg(strategies)
     new_df.index = _flatten_multiindex(new_df.index).rename("name")
 
@@ -384,7 +389,7 @@ try:
     # available using pip as scikit-learn
     from sklearn.cluster import KMeans
 
-    def busmap_by_kmeans(network, bus_weightings, n_clusters, buses_i=None, ** kwargs):
+    def busmap_by_kmeans(network, bus_weightings, n_clusters, buses_i=None,load_cluster=False, n_init=10, max_iter=300, tol=1e-6, n_jobs=1, ** kwargs):
         """
         Create a bus map from the clustering of buses in space with a
         weighting.
@@ -418,10 +423,16 @@ try:
         # same position
         points = (network.buses.loc[buses_i, ["x","y"]].values
                   .repeat(bus_weightings.reindex(buses_i).astype(int), axis=0))
+        #optional load of cluster coordinates
+        if load_cluster != False:
+            busmap_array = np.loadtxt(load_cluster)
+            kmeans = KMeans(init=busmap_array, n_clusters=n_clusters, n_init=n_init, max_iter=max_iter, tol=tol, n_jobs=n_jobs, ** kwargs)
+            kmeans.fit(points)
 
-        kmeans = KMeans(init='k-means++', n_clusters=n_clusters, ** kwargs)
+        else:
+            kmeans = KMeans(init='k-means++', n_clusters=n_clusters, ** kwargs)
 
-        kmeans.fit(points)
+            kmeans.fit(points)
 
         busmap = pd.Series(data=kmeans.predict(network.buses.loc[buses_i, ["x","y"]]),
                            index=buses_i).astype(str)
