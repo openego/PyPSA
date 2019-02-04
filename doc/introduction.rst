@@ -8,17 +8,18 @@ PyPSA is a `free software
 <http://www.gnu.org/philosophy/free-sw.en.html>`_ toolbox for
 simulating and optimising modern power systems that include features
 such as conventional generators with unit commitment, variable wind
-and solar generation, storage units, sector coupling and mixed
-alternating and direct current networks.  PyPSA is designed to scale
-well with large networks and long time series.
+and solar generation, storage units, coupling to other energy sectors,
+and mixed alternating and direct current networks.  PyPSA is designed
+to scale well with large networks and long time series.
 
-
-As of 2017 PyPSA is under heavy development and therefore it is
-recommended to use caution when using it in a production
-environment. Some APIs may change - the changes in each PyPSA version
-are listed in the :doc:`release_notes`.
-
-PyPSA was initially developed by the `Renewable Energy Group
+This project is maintained by the `Energy System Modelling
+group <https://www.iai.kit.edu/english/2338.php>`_ at the `Institute for
+Automation and Applied
+Informatics <https://www.iai.kit.edu/english/index.php>`_ at the
+`Karlsruhe Institute of
+Technology <http://www.kit.edu/english/index.php>`_. The group is funded by the
+`Helmholtz Association <https://www.helmholtz.de/en/>`_ until 2024.
+Previous versions were developed by the `Renewable Energy Group
 <https://fias.uni-frankfurt.de/physics/schramm/renewable-energy-system-and-network-analysis/>`_
 at `FIAS <https://fias.uni-frankfurt.de/>`_ to carry out simulations
 for the `CoNDyNet project <http://condynet.de/>`_, financed by the
@@ -32,14 +33,14 @@ PyPSA can calculate:
 
 * static power flow (using both the full non-linear network equations and
   the linearised network equations)
-* linear optimal power flow (optimisation of power plant and storage
+* linear optimal power flow (least-cost optimisation of power plant and storage
   dispatch within network constraints, using the linear network
   equations, over several snapshots)
 * security-constrained linear optimal power flow
-* total electricity system investment optimisation (using linear
+* total electricity/energy system least-cost investment optimisation (using linear
   network equations, over several snapshots simultaneously for
   optimisation of generation and storage dispatch and investment in
-  the capacities of generation, storage and transmission)
+  the capacities of generation, storage, transmission and other infrastructure)
 
 It has models for:
 
@@ -55,30 +56,27 @@ It has models for:
 * basic components out of which more complicated assets can be built,
   such as Combined Heat and Power (CHP) units, heat pumps, resistive
   Power-to-Heat (P2H), Power-to-Gas (P2G), battery electric vehicles
-  (BEVs), etc.; each of these is demonstrated in the `examples
+  (BEVs), Fischer-Tropsch, direct air capture (DAC), etc.; each of
+  these is demonstrated in the `examples
   <http://www.pypsa.org/examples/>`_
 
 
-Functionality that will definitely be added soon:
-
-* Multi-year investment optimisation
-* Simple RMS simulations with the swing equation
-* Distributed active power slack
-* Non-linear power flow solution using `analytic continuation
-  <https://en.wikipedia.org/wiki/Holomorphic_embedding_load_flow_method>`_
-  in the complex plane following `GridCal
-  <https://github.com/SanPen/GridCal>`_
-
 Functionality that may be added in the future:
 
-* Short-circuit current calculations
-* Dynamic RMS simulations
-* Small signal stability analysis
+* Multi-year investment optimisation
+* Distributed active power slack
 * Interactive web-based GUI with SVG
 * OPF with the full non-linear network equations
-* Dynamic EMT simulations
-* Unbalanced load flow
 * Port to `Julia <http://julialang.org/>`_
+
+Other complementary libraries:
+
+* `pandapower <https://github.com/e2nIEE/pandapower>`_ for more
+  detailed modelling of distribution grids, short-circuit
+  calculations, unbalanced load flow and more
+* `PowerDynamics.jl
+  <https://github.com/JuliaEnergy/PowerDynamics.jl>`_ for dynamic
+  modelling of power grids at time scales where differential equations are relevant
 
 
 
@@ -92,6 +90,17 @@ available as Jupyter notebooks. They are also described in the
 
 Screenshots
 ===========
+
+
+Results from a PyPSA simulation can be converted into an interactive
+online animation using `PyPSA-animation
+<https://github.com/PyPSA/PyPSA-animation>`_, see the `PyPSA-Eur-30
+example <https://www.pypsa.org/animations/pypsa-eur-30/>`_.
+
+Another showcase for PyPSA is the `SciGRID example
+<https://pypsa.org/examples/scigrid-lopf-then-pf-plotly.html>`_ which
+demonstrates interactive plots generated with the `plotly
+<https://plot.ly/python/>`_ library.
 
 
 .. image:: img/line-loading.png
@@ -153,8 +162,8 @@ and DC. PyPSA uses some of the sparse-matrix constructs from PYPOWER.
 What PyPSA uses under the hood
 ===============================
 
-PyPSA is written and tested to be compatible with Python 2.7 and
-Python 3.5.
+PyPSA is written and tested to be compatible with both Python 2.7 and
+Python 3.6.
 
 It leans heavily on the following Python packages:
 
@@ -187,15 +196,32 @@ PyPSA has a Google Group `forum / mailing list
 Citing PyPSA
 ============
 
-
-
 If you use PyPSA for your research, we would appreciate it if you
-would cite the following preprint paper (which has not yet been
-through peer review):
+would cite the following paper:
 
 * T. Brown, J. Hörsch, D. Schlachtberger, `PyPSA: Python for Power
-  System Analysis <https://arxiv.org/abs/1707.09913>`_, 2017,
-  `preprint arXiv:1707.09913 <https://arxiv.org/abs/1707.09913>`_
+  System Analysis <https://arxiv.org/abs/1707.09913>`_, 2018,
+  `Journal of Open Research Software
+  <https://openresearchsoftware.metajnl.com/>`_, 6(1),
+  `arXiv:1707.09913 <https://arxiv.org/abs/1707.09913>`_,
+  `DOI:10.5334/jors.188 <https://doi.org/10.5334/jors.188>`_
+
+Please use the following BibTeX: ::
+
+   @article{PyPSA,
+      author = {T. Brown and J. H\"orsch and D. Schlachtberger},
+      title = {{PyPSA: Python for Power System Analysis}},
+      journal = {Journal of Open Research Software},
+      volume = {6},
+      issue = {1},
+      number = {4},
+      year = {2018},
+      eprint = {1707.09913},
+      url = {https://doi.org/10.5334/jors.188},
+      doi = {10.5334/jors.188}
+   }
+
+
 
 
 If you want to cite a specific PyPSA version, each release of PyPSA is

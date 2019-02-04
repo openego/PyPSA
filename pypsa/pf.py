@@ -1,4 +1,4 @@
-## Copyright 2015-2017 Tom Brown (FIAS), Jonas Hoersch (FIAS)
+## Copyright 2015-2018 Tom Brown (FIAS), Jonas Hoersch (FIAS)
 
 ## This program is free software; you can redistribute it and/or
 ## modify it under the terms of the GNU General Public License as
@@ -43,7 +43,9 @@ from operator import itemgetter
 from itertools import chain
 import time
 
-from .descriptors import get_switchable_as_dense, allocate_series_dataframes, Dict
+from .descriptors import get_switchable_as_dense, allocate_series_dataframes, Dict, zsum, degree
+
+pd.Series.zsum = zsum
 
 def _as_snapshots(network, snapshots):
     if snapshots is None:
@@ -65,7 +67,8 @@ def _allocate_pf_outputs(network, linear=False):
                    'Bus': ['p', 'v_ang', 'v_mag_pu'],
                    'Line': ['p0', 'p1'],
                    'Transformer': ['p0', 'p1'],
-                   'Link': ['p0', 'p1']}
+                   'Link': ["p"+col[3:] for col in network.links.columns if col[:3] == "bus"]}
+
 
     if not linear:
         for component, attrs in to_allocate.items():
@@ -98,7 +101,12 @@ def _network_prepare_and_run_pf(network, snapshots, skip_pre, linear=False, **kw
     if not network.links.empty:
         p_set = get_switchable_as_dense(network, 'Link', 'p_set', snapshots)
         network.links_t.p0.loc[snapshots] = p_set.loc[snapshots]
-        network.links_t.p1.loc[snapshots] = -p_set.loc[snapshots].multiply(network.links.efficiency)
+        for i in [int(col[3:]) for col in network.links.columns if col[:3] == "bus" and col != "bus0"]:
+            eff_name = "efficiency" if i == 1 else "efficiency{}".format(i)
+            p_name = "p{}".format(i)
+            efficiency = get_switchable_as_dense(network, 'Link', eff_name, snapshots)
+            links = network.links.index[network.links["bus{}".format(i)] != ""]
+            network.links_t['p{}'.format(i)].loc[snapshots, links] = -network.links_t.p0.loc[snapshots, links]*efficiency.loc[snapshots, links]
 
     itdf = pd.DataFrame(index=snapshots, columns=network.sub_networks.index, dtype=int)
     difdf = pd.DataFrame(index=snapshots, columns=network.sub_networks.index)
@@ -170,7 +178,7 @@ def newton_raphson_sparse(f, guess, dfdx, x_tol=1e-10, lim_iter=100):
         logger.debug("Error at iteration %d: %f", n_iter, diff)
 
     if diff > x_tol:
-        logger.warn("Warning, we didn't reach the required tolerance within %d iterations, error is at %f. See the section \"Troubleshooting\" in the documentation for tips to fix this. ", n_iter, diff)
+        logger.warning("Warning, we didn't reach the required tolerance within %d iterations, error is at %f. See the section \"Troubleshooting\" in the documentation for tips to fix this. ", n_iter, diff)
     elif not np.isnan(diff):
         converged = True
 
@@ -206,8 +214,6 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, use_
     # _sub_network_prepare_pf(sub_network, snapshots, skip_pre, calculate_Y)
     network = sub_network.network
 
-    from .components import passive_branch_components, controllable_branch_components, controllable_one_port_components
-
     if not skip_pre:
         calculate_dependent_values(network)
         find_bus_controls(sub_network)
@@ -223,7 +229,7 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, use_
 
     for n in ("q", "p"):
         # allow all one ports to dispatch as set
-        for c in sub_network.iterate_components(controllable_one_port_components):
+        for c in sub_network.iterate_components(network.controllable_one_port_components):
             c_n_set = get_switchable_as_dense(network, c.name, n + '_set', snapshots, c.ind)
             c.pnl[n].loc[snapshots, c.ind] = c_n_set
 
@@ -232,14 +238,14 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, use_
             sum([((c.pnl[n].loc[snapshots, c.ind] * c.df.loc[c.ind, 'sign'])
                   .groupby(c.df.loc[c.ind, 'bus'], axis=1).sum()
                   .reindex(columns=buses_o, fill_value=0.))
-                 for c in sub_network.iterate_components(controllable_one_port_components)])
+                 for c in sub_network.iterate_components(network.controllable_one_port_components)])
 
         if n == "p":
             network.buses_t[n].loc[snapshots, buses_o] += sum(
                 [(- c.pnl[n+str(i)].loc[snapshots].groupby(c.df["bus"+str(i)], axis=1).sum()
                   .reindex(columns=buses_o, fill_value=0))
-                 for c in network.iterate_components(controllable_branch_components)
-                 for i in [0,1]])
+                 for c in network.iterate_components(network.controllable_branch_components)
+                 for i in [int(col[3:]) for col in c.df.columns if col[:3] == "bus"]])
 
     def f(guess):
         network.buses_t.v_ang.loc[now,sub_network.pvpqs] = guess[:len(sub_network.pvpqs)]
@@ -336,7 +342,7 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, use_
     #add voltages to branches
     buses_indexer = buses_o.get_indexer
     branch_bus0 = []; branch_bus1 = []
-    for c in sub_network.iterate_components(passive_branch_components):
+    for c in sub_network.iterate_components(network.passive_branch_components):
         branch_bus0 += list(c.df.loc[c.ind, 'bus0'])
         branch_bus1 += list(c.df.loc[c.ind, 'bus1'])
     v0 = V[:,buses_indexer(branch_bus0)]
@@ -350,7 +356,7 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, use_
 
     s0 = pd.DataFrame(v0*np.conj(i0), columns=branches_i, index=snapshots)
     s1 = pd.DataFrame(v1*np.conj(i1), columns=branches_i, index=snapshots)
-    for c in sub_network.iterate_components(passive_branch_components):
+    for c in sub_network.iterate_components(network.passive_branch_components):
         s0t = s0.loc[:,c.name]
         s1t = s1.loc[:,c.name]
         c.pnl.p0.loc[snapshots,s0t.columns] = s0t.values.real
@@ -412,28 +418,25 @@ def apply_line_types(network):
     """
 
     lines_with_types_b = network.lines.type != ""
-
-    if lines_with_types_b.sum() == 0:
+    if lines_with_types_b.zsum() == 0:
         return
 
+    missing_types = (pd.Index(network.lines.loc[lines_with_types_b, 'type'].unique())
+                     .difference(network.line_types.index))
+    assert missing_types.empty, ("The type(s) {} do(es) not exist in network.line_types"
+                                 .format(", ".join(missing_types)))
+
+    # Get a copy of the lines data
+    l = (network.lines.loc[lines_with_types_b, ["type", "length", "num_parallel"]]
+         .join(network.line_types, on='type'))
+
     for attr in ["r","x"]:
-        attr_per_length = network.line_types[attr + "_per_length"]
-        network.lines.loc[lines_with_types_b,attr] = (
-            network.lines.loc[lines_with_types_b, "type"].map(attr_per_length)
-            * network.lines.loc[lines_with_types_b, "length"]
-            / network.lines.loc[lines_with_types_b, "num_parallel"]
-        )
+        l[attr] = l[attr + "_per_length"] * l["length"] / l["num_parallel"]
+    l["b"] = 2*np.pi*1e-9*l["f_nom"] * l["c_per_length"] * l["length"] * l["num_parallel"]
 
-    factor = 2*np.pi*1e-9*network.lines.loc[lines_with_types_b, "type"].map(network.line_types.f_nom)
-    c_per_length = network.line_types["c_per_length"]
-    network.lines.loc[lines_with_types_b, "b"] = (
-        factor
-        * network.lines.loc[lines_with_types_b, "type"].map(c_per_length)
-        * network.lines.loc[lines_with_types_b, "length"]
-        * network.lines.loc[lines_with_types_b, "num_parallel"]
-    )
-
-
+    # now set calculated values on live lines
+    for attr in ["r", "x", "b"]:
+        network.lines.loc[lines_with_types_b, attr] = l[attr]
 
 
 
@@ -443,50 +446,42 @@ def apply_transformer_types(network):
 
     """
 
-    trafos = network.transformers
-    trafos_with_types_b = trafos.type != ""
-
-    if trafos_with_types_b.sum() == 0:
+    trafos_with_types_b = network.transformers.type != ""
+    if trafos_with_types_b.zsum() == 0:
         return
 
-    trafos.loc[trafos_with_types_b, "r"] = trafos.loc[trafos_with_types_b, "type"].map(network.transformer_types["vscr"])/100.
+    missing_types = (pd.Index(network.transformers.loc[trafos_with_types_b, 'type'].unique())
+                     .difference(network.transformer_types.index))
+    assert missing_types.empty, ("The type(s) {} do(es) not exist in network.transformer_types"
+                                 .format(", ".join(missing_types)))
 
-    z = trafos.loc[trafos_with_types_b, "type"].map(network.transformer_types["vsc"])/100.
+    # Get a copy of the transformers data
+    # (joining pulls in "phase_shift", "s_nom", "tap_side" from TransformerType)
+    t = (network.transformers.loc[trafos_with_types_b, ["type", "tap_position", "num_parallel"]]
+         .join(network.transformer_types, on='type'))
 
-    trafos.loc[trafos_with_types_b, "x"] = np.sqrt(z**2 - trafos.loc[trafos_with_types_b, "r"]**2)
-
-    for attr in ["phase_shift","s_nom"]:
-        trafos.loc[trafos_with_types_b, attr] = trafos.loc[trafos_with_types_b, "type"].map(network.transformer_types[attr])
+    t["r"] = t["vscr"] /100.
+    t["x"] = np.sqrt((t["vsc"]/100.)**2 - t["r"]**2)
 
     #NB: b and g are per unit of s_nom
-    trafos.loc[trafos_with_types_b, "g"] = trafos.loc[trafos_with_types_b, "type"].map(network.transformer_types["pfe"])/(1000. * trafos.loc[trafos_with_types_b, "s_nom"])
-
-    i0 = trafos.loc[trafos_with_types_b, "type"].map(network.transformer_types["i0"])/100.
-
-    b_minus_squared = i0**2 - trafos.loc[trafos_with_types_b, "g"]**2
+    t["g"] = t["pfe"]/(1000. * t["s_nom"])
 
     #for some bizarre reason, some of the standard types in pandapower have i0^2 < g^2
-
-    b_minus_squared[b_minus_squared < 0.] = 0.
-
-    trafos.loc[trafos_with_types_b, "b"] = - np.sqrt(b_minus_squared)
-
+    t["b"] = - np.sqrt(((t["i0"]/100.)**2 - t["g"]**2).clip(lower=0))
 
     for attr in ["r","x"]:
-        trafos.loc[trafos_with_types_b, attr] = trafos.loc[trafos_with_types_b, attr]/trafos.loc[trafos_with_types_b, "num_parallel"]
+        t[attr] /= t["num_parallel"]
 
     for attr in ["b","g"]:
-        trafos.loc[trafos_with_types_b, attr] = trafos.loc[trafos_with_types_b, attr]*trafos.loc[trafos_with_types_b, "num_parallel"]
-
+        t[attr] *= t["num_parallel"]
 
     #deal with tap positions
 
-    trafos.loc[trafos_with_types_b, "tap_ratio"] = 1 + (
-        trafos.loc[trafos_with_types_b, "tap_position"] -
-        trafos.loc[trafos_with_types_b, "type"].map(network.transformer_types["tap_neutral"])) * (
-            trafos.loc[trafos_with_types_b, "type"].map(network.transformer_types["tap_step"])/100.)
+    t["tap_ratio"] = 1. + (t["tap_position"] - t["tap_neutral"]) * (t["tap_step"]/100.)
 
-    trafos.loc[trafos_with_types_b, "tap_side"] = trafos.loc[trafos_with_types_b, "type"].map(network.transformer_types["tap_side"])
+    # now set calculated values on live transformers
+    for attr in ["r", "x", "g", "b", "phase_shift", "s_nom", "tap_side", "tap_ratio"]:
+        network.transformers.loc[trafos_with_types_b, attr] = t[attr]
 
     #TODO: status, rate_A
 
@@ -505,7 +500,7 @@ def apply_transformer_t_model(network):
 
     ts_b = (network.transformers.model == "t") & (y_shunt != 0.)
 
-    if ts_b.sum() == 0:
+    if ts_b.zsum() == 0:
         return
 
     za,zb,zc = wye_to_delta(z_series.loc[ts_b]/2,z_series.loc[ts_b]/2,1/y_shunt.loc[ts_b])
@@ -528,12 +523,17 @@ def calculate_dependent_values(network):
     network.lines["r_pu"] = network.lines.r/(network.lines.v_nom**2)
     network.lines["b_pu"] = network.lines.b*network.lines.v_nom**2
     network.lines["g_pu"] = network.lines.g*network.lines.v_nom**2
+    network.lines["x_pu_eff"] = network.lines["x_pu"]
+    network.lines["r_pu_eff"] = network.lines["r_pu"]
+
 
     #convert transformer impedances from base power s_nom to base = 1 MVA
     network.transformers["x_pu"] = network.transformers.x/network.transformers.s_nom
     network.transformers["r_pu"] = network.transformers.r/network.transformers.s_nom
     network.transformers["b_pu"] = network.transformers.b*network.transformers.s_nom
     network.transformers["g_pu"] = network.transformers.g*network.transformers.s_nom
+    network.transformers["x_pu_eff"] = network.transformers["x_pu"]* network.transformers["tap_ratio"]
+    network.transformers["r_pu_eff"] = network.transformers["r_pu"]* network.transformers["tap_ratio"]
 
     apply_transformer_t_model(network)
 
@@ -548,7 +548,7 @@ def find_slack_bus(sub_network):
     gens = sub_network.generators()
 
     if len(gens) == 0:
-        logger.warn("No generators in sub-network {}, better hope power is already balanced".format(sub_network.name))
+        logger.warning("No generators in sub-network {}, better hope power is already balanced".format(sub_network.name))
         sub_network.slack_generator = None
         sub_network.slack_bus = sub_network.buses_i()[0]
 
@@ -592,9 +592,11 @@ def find_bus_controls(sub_network):
     network.buses.loc[buses_i, "control"] = "PQ"
 
     #find all buses with one or more gens with PV
-    pvs = gens[gens.control == 'PV'].index.to_series().groupby(gens.bus).first()
-    network.buses.loc[pvs.index, "control"] = "PV"
-    network.buses.loc[pvs.index, "generator"] = pvs
+    pvs = gens[gens.control == 'PV'].index.to_series()
+    if len(pvs) > 0:
+        pvs = pvs.groupby(gens.bus).first()
+        network.buses.loc[pvs.index, "control"] = "PV"
+        network.buses.loc[pvs.index, "generator"] = pvs
 
     network.buses.loc[sub_network.slack_bus, "control"] = "Slack"
     network.buses.loc[sub_network.slack_bus, "generator"] = sub_network.slack_generator
@@ -612,8 +614,6 @@ def find_bus_controls(sub_network):
 def calculate_B_H(sub_network,skip_pre=False):
     """Calculate B and H matrices for AC or DC sub-networks."""
 
-    from .components import passive_branch_components
-
     network = sub_network.network
 
     if not skip_pre:
@@ -621,20 +621,19 @@ def calculate_B_H(sub_network,skip_pre=False):
         find_bus_controls(sub_network)
 
     if network.sub_networks.at[sub_network.name,"carrier"] == "DC":
-        attribute="r_pu"
+        attribute="r_pu_eff"
     else:
-        attribute="x_pu"
+        attribute="x_pu_eff"
 
     #following leans heavily on pypower.makeBdc
 
     #susceptances
-    b = 1./np.concatenate([(c.df.loc[c.ind, attribute]*c.df.loc[c.ind, "tap_ratio"]).values if c.name == "Transformer"
-                           else c.df.loc[c.ind, attribute].values
-                           for c in sub_network.iterate_components(passive_branch_components)])
+    b = 1./np.concatenate([(c.df.loc[c.ind, attribute]).values \
+                           for c in sub_network.iterate_components(network.passive_branch_components)])
 
 
     if np.isnan(b).any():
-        logger.warn("Warning! Some series impedances are zero - this will cause a singularity in LPF!")
+        logger.warning("Warning! Some series impedances are zero - this will cause a singularity in LPF!")
     b_diag = csr_matrix((b, (r_[:len(b)], r_[:len(b)])))
 
     #incidence matrix
@@ -648,7 +647,7 @@ def calculate_B_H(sub_network,skip_pre=False):
 
     sub_network.p_branch_shift = -b*np.concatenate([(c.df.loc[c.ind, "phase_shift"]).values*np.pi/180. if c.name == "Transformer"
                                                     else np.zeros((len(c.ind),))
-                                                    for c in sub_network.iterate_components(passive_branch_components)])
+                                                    for c in sub_network.iterate_components(network.passive_branch_components)])
 
     sub_network.p_bus_shift = sub_network.K * sub_network.p_branch_shift
 
@@ -700,7 +699,7 @@ def calculate_Y(sub_network,skip_pre=False):
         calculate_dependent_values(sub_network.network)
 
     if sub_network.network.sub_networks.at[sub_network.name,"carrier"] != "AC":
-        logger.warn("Non-AC networks not supported for Y!")
+        logger.warning("Non-AC networks not supported for Y!")
         return
 
     branches = sub_network.branches()
@@ -790,7 +789,7 @@ averaged).
             attr_mean = ["capital_cost","length","terrain_factor"]
 
             for attr in attr_inv:
-                aggregated[attr] = 1/(1/lines[attr]).sum()
+                aggregated[attr] = 1./(1./lines[attr]).sum()
 
             for attr in attr_sum:
                 aggregated[attr] = lines[attr].sum()
@@ -828,11 +827,11 @@ def find_tree(sub_network, weight='x_pu'):
     branches_i = branches_bus0.index
     buses_i = sub_network.buses_i()
 
-    graph = sub_network.graph(weight=weight)
+    graph = sub_network.graph(weight=weight, inf_weight=1.)
     sub_network.tree = nx.minimum_spanning_tree(graph)
 
     #find bus with highest degree to use as slack
-    tree_slack_bus, slack_degree = max(sub_network.tree.degree_iter(), key=itemgetter(1))
+    tree_slack_bus, slack_degree = max(degree(sub_network.tree), key=itemgetter(1))
     logger.info("Tree slack bus is %s with degree %d.", tree_slack_bus, slack_degree)
 
     #determine which buses are supplied in tree through branch from slack
@@ -863,7 +862,7 @@ def find_cycles(sub_network, weight='x_pu'):
     branches_i = branches_bus0.index
 
     #reduce to a non-multi-graph for cycles with > 2 edges
-    mgraph = sub_network.graph(weight=weight)
+    mgraph = sub_network.graph(weight=weight, inf_weight=False)
     graph = nx.OrderedGraph(mgraph)
 
     cycles = nx.cycle_basis(graph)
@@ -919,10 +918,6 @@ def sub_network_lpf(sub_network, snapshots=None, skip_pre=False):
     logger.info("Performing linear load-flow on %s sub-network %s for snapshot(s) %s",
                 sub_network.network.sub_networks.at[sub_network.name,"carrier"], sub_network, snapshots)
 
-    from .components import \
-        one_port_components, controllable_one_port_components, \
-        passive_branch_components, controllable_branch_components
-
     network = sub_network.network
 
 
@@ -942,7 +937,7 @@ def sub_network_lpf(sub_network, snapshots=None, skip_pre=False):
         network.shunt_impedances.g_pu.loc[shunt_impedances_i].values
 
     # allow all one ports to dispatch as set
-    for c in sub_network.iterate_components(controllable_one_port_components):
+    for c in sub_network.iterate_components(network.controllable_one_port_components):
         c_p_set = get_switchable_as_dense(network, c.name, 'p_set', snapshots, c.ind)
         c.pnl.p.loc[snapshots, c.ind] = c_p_set
 
@@ -951,12 +946,12 @@ def sub_network_lpf(sub_network, snapshots=None, skip_pre=False):
         sum([((c.pnl.p.loc[snapshots, c.ind] * c.df.loc[c.ind, 'sign'])
               .groupby(c.df.loc[c.ind, 'bus'], axis=1).sum()
               .reindex(columns=buses_o, fill_value=0.))
-             for c in sub_network.iterate_components(one_port_components)]
+             for c in sub_network.iterate_components(network.one_port_components)]
             +
             [(- c.pnl["p"+str(i)].loc[snapshots].groupby(c.df["bus"+str(i)], axis=1).sum()
               .reindex(columns=buses_o, fill_value=0))
-             for c in network.iterate_components(controllable_branch_components)
-             for i in [0,1]])
+             for c in network.iterate_components(network.controllable_branch_components)
+             for i in [int(col[3:]) for col in c.df.columns if col[:3] == "bus"]])
 
     if not skip_pre and len(branches_i) > 0:
         calculate_B_H(sub_network, skip_pre=True)
@@ -968,7 +963,7 @@ def sub_network_lpf(sub_network, snapshots=None, skip_pre=False):
         flows = pd.DataFrame(v_diff * sub_network.H.T,
                              columns=branches_i, index=snapshots) + sub_network.p_branch_shift
 
-        for c in sub_network.iterate_components(passive_branch_components):
+        for c in sub_network.iterate_components(network.passive_branch_components):
             f = flows.loc[:, c.name]
             c.pnl.p0.loc[snapshots, f.columns] = f
             c.pnl.p1.loc[snapshots, f.columns] = -f
@@ -981,7 +976,7 @@ def sub_network_lpf(sub_network, snapshots=None, skip_pre=False):
         network.buses_t.v_mag_pu.loc[snapshots, buses_o] = 1.
 
     # set slack bus power to pick up remained
-    slack_adjustment = (- network.buses_t.p.loc[snapshots, buses_o[1:]].sum(axis=1)
+    slack_adjustment = (- network.buses_t.p.loc[snapshots, buses_o[1:]].sum(axis=1).fillna(0.)
                         - network.buses_t.p.loc[snapshots, buses_o[0]])
     network.buses_t.p.loc[snapshots, buses_o[0]] += slack_adjustment
 

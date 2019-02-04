@@ -28,15 +28,20 @@ Overview
 Execute:
 
 
-``network.lopf(snapshots, solver_name="glpk", solver_io=None, extra_functionality=None, solver_options={}, keep_files=False, formulation="angles")``
+``network.lopf(snapshots, solver_name="glpk", solver_io=None,
+extra_functionality=None, solver_options={}, keep_files=False,
+formulation="angles",extra_postprocessing=None)``
 
 where ``snapshots`` is an iterable of snapshots, ``solver_name`` is a
 string, e.g. "gurobi" or "glpk", ``solver_io`` is a string,
 ``extra_functionality`` is a function of network and snapshots that is
-called before the solver (see below), ``solver_options`` is a
-dictionary of flags to pass to the solver, ``keep_files`` means that
-the ``.lp`` file is saved and ``formulation`` is a string in
-``["angles","cycles","kirchhoff","ptdf"]`` (see :ref:`formulations` for more details).
+called before the solver (see below), ``extra_postprocessing`` is a
+function of network, snapshots and duals that is called after solving
+(see below), ``solver_options`` is a dictionary of flags to pass to
+the solver, ``keep_files`` means that the ``.lp`` file is saved and
+``formulation`` is a string in
+``["angles","cycles","kirchhoff","ptdf"]`` (see :ref:`formulations`
+for more details).
 
 The linear OPF module can optimises the dispatch of generation and storage
 and the capacities of generation, storage and transmission.
@@ -460,7 +465,7 @@ cases. The speedup is higher for larger networks with dispatchable
 generators at most nodes.
 
 
-
+.. _opf-links:
 
 Controllable branch flows: links
 ---------------------------------
@@ -476,8 +481,14 @@ optimisation variable for each component which satisfies
    |f_{l,t}| \leq F_l
 
 If the link flow is positive :math:`f_{l,t} > 0` then it withdraws
-:math:`f_{l,t}` from bus0 and feeds in :math:`\eta_l f_{l,t}` to bus1,
-where :math:`\eta_l` is the link efficiency.
+:math:`f_{l,t}` from ``bus0`` and feeds in :math:`\eta_l f_{l,t}` to
+``bus1``, where :math:`\eta_l` is the link efficiency.
+
+If additional output buses ``busi`` for :math:`i=2,3,\dots` are
+defined (i.e. ``bus2``, ``bus3``, etc) and their associated
+efficiencies ``efficiencyi``, i.e. :math:`\eta_{i,l}`, then at
+``busi`` the feed-in is :math:`\eta_{i,l} f_{l,t}`. See also
+:ref:`components-links-multiple-outputs`.
 
 
 .. _nodal-power-balance:
@@ -559,6 +570,12 @@ and stores
 <https://pypsa.org/examples/replace-generator-storage-units-with-store.html>`_
 both pass an ``extra_functionality`` argument to the LOPF to add
 functionality.
+
+The function ``extra_postprocessing`` is called after the model has
+solved and the results are extracted.  This function must take three
+arguments `extra_postprocessing(network,snapshots,duals)`. It allows
+the user to extract further information about the solution, such as
+additional shadow prices for constraints.
 
 
 Inputs

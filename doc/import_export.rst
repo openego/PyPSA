@@ -181,18 +181,52 @@ Following the previous example:
 				         "Generator",
 					 "p_max_pu")
 
+Export to netCDF
+================
+
+Export network and components to a netCDF file.
+
+netCDF files take up less space than CSV files and are faster to load.
+
+netCDF is also preferred over HDF5 because netCDF is structured more
+cleanly, is easier to use from other programming languages, can limit
+float precision to save space and supports lazy loading.
+
+Both static and series attributes of components are exported, but only
+if they have non-default values.
+
+``network.export_to_netcdf(file.nc)``
+
+If ``file.nc`` does not already exist, it is created.
+
+
+Import from netCDF
+==================
+
+Import network data from netCDF file ``file.nc``:
+
+``network.import_from_netcdf(file.nc)``
+
+
 Export to HDF5
 ==============
 
 Export network and components to an HDF store.
 
+NB: netCDF is preferred over HDF5 because netCDF is structured more
+cleanly, is easier to use from other programming languages, can limit
+float precision to save space and supports lazy loading.
+
+
 Both static and series attributes of components are exported, but only
 if they have non-default values.
 
-If path does not already exist, it is created.
+``network.export_to_hdf5(path)``
 
 
-``network.export_to_hdf5(filename)``
+If ``path`` does not already exist, it is created.
+
+
 
 Import from HDF5
 ================
