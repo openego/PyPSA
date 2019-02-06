@@ -113,7 +113,13 @@ def aggregateoneport(network, busmap, component, with_time=True, custom_strategi
     attrs = network.components[component]["attrs"]
     old_df = getattr(network, network.components[component]["list_name"]).assign(bus=lambda df: df.bus.map(busmap))
     columns = set(attrs.index[attrs.static & attrs.status.str.startswith('Input')]) & set(old_df.columns)
-    grouper = old_df.bus if 'carrier' not in columns else [old_df.bus, old_df.carrier]
+
+    if ('carrier' in columns and 'max_hours' in columns):
+        grouper = [old_df.bus, old_df.carrier, old_df.max_hours]
+    elif ('carrier' in columns and not 'max_hours' in columns):
+        grouper = [old_df.bus, old_df.carrier]
+    else:
+        grouper = old_df.bus
 
     def aggregate_max_hours(max_hours):
         if (max_hours == max_hours.iloc[0]).all():
@@ -122,8 +128,8 @@ def aggregateoneport(network, busmap, component, with_time=True, custom_strategi
             return (max_hours * _normed(old_df.p_nom.reindex(max_hours.index))).sum()
 
     default_strategies = dict(p=np.sum, q=np.sum, p_set=np.sum, q_set=np.sum,
-                              p_nom=np.sum, p_nom_max=np.sum, p_nom_min=np.sum,
-                              max_hours=aggregate_max_hours)
+                              p_nom=np.sum, p_nom_max=np.sum, p_nom_min=np.sum)
+                              #max_hours=aggregate_max_hours)
     strategies = {attr: default_strategies.get(attr, _make_consense(component, attr))
                   for attr in columns}
     strategies.update(custom_strategies)
@@ -132,14 +138,27 @@ def aggregateoneport(network, busmap, component, with_time=True, custom_strategi
     if 'capital_cost' in columns:
         strategies.update({'capital_cost':np.mean})
     new_df = old_df.groupby(grouper).agg(strategies)
-    new_df.index = _flatten_multiindex(new_df.index).rename("name")
 
+    if 'max_hours' in columns:
+        # index level max_hours is of type numeric.Float64Index, that cannot
+        # be handled by _flatten_multiindex, other indices are of type
+        # base.Index, thus we have to convert the datatype of max_hours. There
+        # might be a better way to do it inplace instead of reconstructing the
+        # Index.
+        new_df.reset_index(drop=True, inplace=True)
+        new_df.max_hours = new_df.max_hours.astype('str')
+        new_df.set_index(['bus', 'carrier', 'max_hours'])
+
+    new_df.index = _flatten_multiindex(new_df.index).rename("name")
     new_pnl = dict()
     if with_time:
         old_pnl = network.pnl(component)
         for attr, df in iteritems(old_pnl):
             if not df.empty:
                 pnl_df = df.groupby(grouper, axis=1).sum()
+                if 'max_hours' in columns:
+                    pnl_df.columns.set_levels(pnl_df.columns.levels[2].astype(object), level=2, inplace=True)
+                    pnl_df.columns.set_levels(pnl_df.columns.levels[2].astype(str), level=2, inplace=True)
                 pnl_df.columns = _flatten_multiindex(pnl_df.columns).rename("name")
                 new_pnl[attr] = pnl_df
 
