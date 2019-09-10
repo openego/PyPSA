@@ -1441,12 +1441,14 @@ def network_lopf(network, snapshots=None, solver_name="glpk", solver_io=None,
     """
 
     snapshots = _as_snapshots(network, snapshots)
-
+    import time
+    x = time.time()
     network_lopf_build_model(network, snapshots, skip_pre=skip_pre, formulation=formulation, ptdf_tolerance=ptdf_tolerance)
 
     if extra_functionality is not None:
         extra_functionality(network,snapshots)
-
+    y = (time.time() - x)/60
+    logger.info("Model build [min] " +str(y))
     network_lopf_prepare_solver(network, solver_name=solver_name, solver_io=solver_io)
 
     return network_lopf_solve(network, snapshots, formulation=formulation, solver_options=solver_options, keep_files=keep_files, free_memory=free_memory)

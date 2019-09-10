@@ -169,7 +169,7 @@ def aggregatebuses(network, busmap, custom_strategies=dict()):
                               for f in network.buses.columns
                               if f in columns or f in custom_strategies])
 
-def aggregatelines(network, buses, interlines, line_length_factor=1.0):
+def aggregatelines(network, buses, interlines, line_length_factor=1.0, line_agg=True):
 
     #make sure all lines have same bus ordering
     positive_order = interlines.bus0_s < interlines.bus1_s
@@ -197,7 +197,6 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
 
         voltage_factor = (np.asarray(network.buses.loc[l.bus0,'v_nom'])/v_nom_s)**2
         length_factor = (length_s/l['length'])
-
         if l['s_nom_extendable'].any():
             costs = np.average(l['capital_cost'][l.s_nom_extendable] *
                 length_factor[l.s_nom_extendable],
@@ -220,21 +219,66 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0):
             length=length_s,
             sub_network=consense['sub_network'](l['sub_network']),
             v_ang_min=l['v_ang_min'].max(),
-            v_ang_max=l['v_ang_max'].min()
+            v_ang_max=l['v_ang_max'].min(),
+            num_parallel=l['num_parallel'].sum()
         )
+        
         data.update((f, consense[f](l[f])) for f in columns.difference(data))
         return pd.Series(data, index=[f for f in l.columns if f in columns])
 
-    lines = interlines_c.groupby(['bus0_s', 'bus1_s']).apply(aggregatelinegroup)
-    lines['name'] = [str(i+1) for i in range(len(lines))]
 
-    linemap_p = interlines_p.join(lines['name'], on=['bus0_s', 'bus1_s'])['name']
-    linemap_n = interlines_n.join(lines['name'], on=['bus0_s', 'bus1_s'])['name']
-    linemap = pd.concat((linemap_p,linemap_n))
+    def aggeregatelineimpedance(l):
 
+        length_s = _haversine(buses.loc[list(l.name),['x', 'y']])*line_length_factor
+        length_factor = (length_s/l['length'])
+        x = dict(x=len(l)*(1./(1/(length_factor * l['x'])).sum()))
+
+        return x['x']
+
+    def calc_line_lengthfactor(l):
+
+        length_s = _haversine(buses.loc[list(l.name),['x', 'y']])*line_length_factor
+        length_factor = (length_s/l['length'])
+        x = l['x']*length_factor
+        return x
+    
+    if line_agg:
+        
+        lines = interlines_c.groupby(['bus0_s', 'bus1_s']).apply(aggregatelinegroup)
+        lines['name'] = [str(i+1) for i in range(len(lines))]
+
+        linemap_p = interlines_p.join(lines['name'], on=['bus0_s', 'bus1_s'])['name']
+        linemap_n = interlines_n.join(lines['name'], on=['bus0_s', 'bus1_s'])['name']
+        linemap = pd.concat((linemap_p,linemap_n))
+        
+    else:
+        logger.info("K-means clustering without line aggregation")
+        lines = interlines_c[['bus0_s', 'bus1_s', 'x', 'r', 'g', 'b', 's_nom', 's_nom_extendable', 's_nom_min',
+       's_nom_max', 'capital_cost', 'length', 'terrain_factor', 'type',
+        'num_parallel', 'v_ang_min', 'v_ang_max']]
+        lines['name'] = [str(i+1) for i in range(len(lines))]
+
+        interlines_p['name'] = interlines_p.index
+        interlines_n['name'] = interlines_n.index 
+
+        linemap_p = interlines_p['name']
+        linemap_n = interlines_n['name']
+        linemap = pd.concat((linemap_p,linemap_n))
+        agg_x=False
+        if agg_x:
+            x_single = lines.groupby(['bus0_s', 'bus1_s']).apply(aggeregatelineimpedance).reset_index()
+            lines.x = pd.merge(x_single, lines, on=['bus0_s','bus1_s'], how='inner', left_index=True)[0].sort_index()
+            
+        else:
+            new_x=lines.groupby(['bus0_s', 'bus1_s']).apply(calc_line_lengthfactor).reset_index()
+            
+            #new_x.columns=['bus0_s', 'bus1_s', 'index', 'x_new']
+            new_x = new_x.set_index('level_2')
+            
+            lines.x =new_x[0] 
     return lines, linemap_p, linemap_n, linemap
 
-def get_buses_linemap_and_lines(network, busmap, line_length_factor=1.0, bus_strategies=dict()):
+def get_buses_linemap_and_lines(network, busmap, line_length_factor=1.0, bus_strategies=dict(), line_agg=True):
     # compute new buses
     buses = aggregatebuses(network, busmap, bus_strategies)
 
@@ -243,7 +287,7 @@ def get_buses_linemap_and_lines(network, busmap, line_length_factor=1.0, bus_str
 
     # lines between different clusters
     interlines = lines.loc[lines['bus0_s'] != lines['bus1_s']]
-    lines, linemap_p, linemap_n, linemap = aggregatelines(network, buses, interlines, line_length_factor)
+    lines, linemap_p, linemap_n, linemap = aggregatelines(network, buses, interlines, line_length_factor, line_agg)
     return (buses,
             linemap,
             linemap_p,
@@ -257,9 +301,9 @@ Clustering = namedtuple('Clustering', ['network', 'busmap', 'linemap',
 
 def get_clustering_from_busmap(network, busmap, with_time=True, line_length_factor=1.0,
                                aggregate_generators_weighted=False, aggregate_one_ports={},
-                               bus_strategies=dict()):
+                               bus_strategies=dict(), line_agg=True):
 
-    buses, linemap, linemap_p, linemap_n, lines = get_buses_linemap_and_lines(network, busmap, line_length_factor, bus_strategies)
+    buses, linemap, linemap_p, linemap_n, lines = get_buses_linemap_and_lines(network, busmap, line_length_factor, bus_strategies, line_agg)
 
     network_c = Network()
 

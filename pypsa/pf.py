@@ -691,6 +691,8 @@ def calculate_PTDF(sub_network,skip_pre=False):
     B_inverse = np.vstack((np.zeros(n_pvpq+1),B_inverse))
 
     sub_network.PTDF = sub_network.H*B_inverse
+    
+#   import pdb; pdb.set_trace()
 
 
 def calculate_Y(sub_network,skip_pre=False):
