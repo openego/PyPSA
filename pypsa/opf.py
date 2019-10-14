@@ -811,7 +811,7 @@ def define_passive_branch_flows_with_kirchhoff(network,snapshots,skip_vars=False
             cycle_index.append((sn.name, j))
 
             for snapshot in snapshots:
-                lhs = LExpression([(branches.at[branches.index[i],attribute]*
+                lhs = LExpression([(1e5 * branches.at[branches.index[i],attribute]*
                                     (branches.at[branches.index[i],"tap_ratio"] if branches.index[i][0] == "Transformer" else 1.)*sn.C[i,j],
                                     network.model.passive_branch_p[branches.index[i][0], branches.index[i][1], snapshot])
                                    for i in cycle_is])
@@ -851,7 +851,6 @@ def define_passive_branch_constraints(network,snapshots):
 
     l_constraint(network.model, "flow_lower", flow_lower,
                  list(passive_branches.index), snapshots)
-
 def define_nodal_balances(network,snapshots):
     """Construct the nodal balance for all elements except the passive
     branches.

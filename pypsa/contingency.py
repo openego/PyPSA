@@ -131,8 +131,9 @@ def network_lpf_contingency(network, snapshots=None, branch_outages=None):
         p0_base[c] = pnl.p0.loc[snapshot]
 
     for sn in network.sub_networks.obj:
-        sn._branches = sn.branches()
-        sn.calculate_BODF()
+        if len(sn.branches())>0:
+            sn._branches = sn.branches()
+            sn.calculate_BODF()
 
     p0 = pd.DataFrame(index=passive_branches.index)
 
@@ -140,7 +141,7 @@ def network_lpf_contingency(network, snapshots=None, branch_outages=None):
 
     for branch in branch_outages:
         if type(branch) is not tuple:
-            logger.warning("No type given for {}, assuming it is a line".format(branch))
+           # logger.warning("No type given for {}, assuming it is a line".format(branch))
             branch = ("Line",branch)
 
         sn = network.sub_networks.obj[passive_branches.sub_network[branch]]
@@ -240,7 +241,7 @@ def network_sclopf(network, snapshots=None, branch_outages=None, solver_name="gl
             branch_i = sub._branches.at[branch,"_i"]
             bodfs = pd.DataFrame(data=sub.BODF, index =sub._branches.index)[branch_i]
             
-            branch_outage_keys.extend([(branch[0],branch[1],b[0],b[1]) for b in bodfs[bodfs.abs()>0.0].index])
+            branch_outage_keys.extend([(branch[0],branch[1],b[0],b[1]) for b in bodfs[bodfs.abs()>0.1].index])
 
             flow_upper.update({(branch[0],branch[1],b[0],b[1],sn) : [[(1,network.model.passive_branch_p[b[0],b[1],sn]),(sub.BODF[sub._branches.at[b,"_i"],branch_i],network.model.passive_branch_p[branch[0],branch[1],sn])],"<=",sub._fixed_branches.at[b,"s_nom"]] for b in sub._fixed_branches.index for sn in snapshots})
 
