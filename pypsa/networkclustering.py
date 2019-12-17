@@ -34,10 +34,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-from .descriptors import OrderedGraph
-from .components import Network
+from pypsa.descriptors import OrderedGraph
+from pypsa.components import Network
 
-from . import components, io
+from pypsa import components, io
 
 
 def _flatten_multiindex(m, join=' '):
@@ -223,25 +223,21 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0, line_agg=
             num_parallel=l['num_parallel'].sum(),
             original_lines = str(list(l.original_lines))
         )
-
         data.update((f, consense[f](l[f])) for f in columns.difference(data))
         return pd.Series(data, index=[f for f in l.columns if f in columns])
 
 
-    def aggeregatelineimpedance(l):
-
-        length_s = _haversine(buses.loc[list(l.name),['x', 'y']])*line_length_factor
-        length_factor = (length_s/l['length'])
-        x = dict(x=len(l)*(1./(1/(length_factor * l['x'])).sum()))
-
-        return x['x']
 
     def calc_line_lengthfactor(l):
 
         length_s = _haversine(buses.loc[list(l.name),['x', 'y']])*line_length_factor
         length_factor = (length_s/l['length'])
         x = l['x']*length_factor
-        return x
+        
+        data=pd.DataFrame(index = x.index, columns = ['x', 'length'])
+        data.x = x
+        data.length = length_s
+        return data
     
     if line_agg:
         
@@ -265,18 +261,14 @@ def aggregatelines(network, buses, interlines, line_length_factor=1.0, line_agg=
         linemap_p = interlines_p['name']
         linemap_n = interlines_n['name']
         linemap = pd.concat((linemap_p,linemap_n))
-        agg_x=False
-        if agg_x:
-            x_single = lines.groupby(['bus0_s', 'bus1_s']).apply(aggeregatelineimpedance).reset_index()
-            lines.x = pd.merge(x_single, lines, on=['bus0_s','bus1_s'], how='inner', left_index=True)[0].sort_index()
-            
-        else:
-            new_x=lines.groupby(['bus0_s', 'bus1_s']).apply(calc_line_lengthfactor).reset_index()
-            
-            #new_x.columns=['bus0_s', 'bus1_s', 'index', 'x_new']
-            new_x = new_x.set_index('level_2')
-            
-            lines.x =new_x[0] 
+
+        data=lines.groupby(['bus0_s', 'bus1_s']).apply(calc_line_lengthfactor)
+        
+        lines.x =data.x
+        lines.length =data.length
+        
+        lines.index.name = ''
+        
     return lines, linemap_p, linemap_n, linemap
 
 def get_buses_linemap_and_lines(network, busmap, line_length_factor=1.0, bus_strategies=dict(), line_agg=True):
@@ -289,6 +281,7 @@ def get_buses_linemap_and_lines(network, busmap, line_length_factor=1.0, bus_str
     # lines between different clusters
     interlines = lines.loc[lines['bus0_s'] != lines['bus1_s']]
     lines, linemap_p, linemap_n, linemap = aggregatelines(network, buses, interlines, line_length_factor, line_agg)
+
     return (buses,
             linemap,
             linemap_p,

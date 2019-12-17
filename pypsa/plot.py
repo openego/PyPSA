@@ -216,10 +216,19 @@ def plot(network, margin=0.05, ax=None, basemap=True, bus_colors='b',
                 l_colors.fillna(l_defaults['color'], inplace=True)
 
         if not geometry:
-            segments = (np.asarray(((c.df.bus0.map(x),
-                                     c.df.bus0.map(y)),
-                                    (c.df.bus1.map(x),
-                                     c.df.bus1.map(y))))
+            x1 = c.df.bus0.map(x)
+            y1 = c.df.bus0.map(y)
+            x2 = c.df.bus1.map(x)
+            y2 = c.df.bus1.map(y)
+            if jitter is not None:
+                diff_x = np.random.uniform(low=-jitter, high=jitter, size=len(x1))
+                diff_y =0# np.random.uniform(low=-jitter, high=jitter, size=len(y1))
+                x1 = x1 + diff_x
+                y1 = y1 + diff_y
+                x2 = x2 + diff_x
+                y2 = y2 + diff_y
+            segments = (np.asarray(((x1,y1),
+                                    (x2,y2)))
                         .transpose(2, 0, 1))
         else:
             from shapely.wkt import loads

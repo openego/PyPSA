@@ -94,7 +94,11 @@ def adjacency_matrix(network, branch_components=None, busorder=None, weights=Non
         if busorder is None:
             busorder = network.buses_i()
     else:
-        raise TypeError(" must be called with a Network or a SubNetwork")
+        if branch_components is None:
+            branch_components = components.branch_components
+        if busorder is None:
+            busorder = network.buses.index
+        #raise TypeError(" must be called with a Network or a SubNetwork")
 
     no_buses = len(busorder)
     no_branches = 0
