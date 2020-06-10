@@ -20,9 +20,9 @@ setup(
     license='GPLv3',
     packages=find_packages(exclude=['doc', 'test']),
     include_package_data=True,
-    install_requires=['numpy',
+    install_requires=['numpy>=1.16.2',
                       'pyomo==5.5.0',
-                      'scipy',
+                      'scipy==0.19.0',
                       'pandas >= 0.19.0, <=0.20.3',
                       'networkx==1.10'],
     classifiers=[
